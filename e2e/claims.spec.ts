@@ -58,31 +58,37 @@ test('rendered T exactly matches the cross term and plain residual', async ({ pa
 
 test('per-fold work stays constant and the final opening proves the negative claim', async ({ page }) => {
   await page.getByRole('button', { name: 'Fold 8 steps' }).click()
-  await expect(page.getByText('FOLDED 8 → 1, VALID')).toBeVisible()
-  expect(await claim(page, 'chain-ops')).toBe(await claim(page, 'ops-per-fold'))
+  await expect(page.locator('[data-verdict="chain"]')).toContainText('FOLDED 8 → 1, VALID')
+  // The chain total is a real sum of per-fold measurements, so it must equal the per-fold cost
+  // times the seven folds an eight-step chain performs. Comparing chain-ops to ops-per-fold
+  // instead would be one rendering of a measurement against another rendering of the same one.
+  expect(Number(await claim(page, 'chain-total-ops'))).toBe(Number(await claim(page, 'chain-ops')) * 7)
   expect(await claim(page, 'folded-w-length')).toBe(await claim(page, 'step-w-length'))
   await page.getByRole('button', { name: 'Open final W′ and E′' }).click()
-  await expect(page.getByText('VALID — AND NOTHING HIDDEN')).toBeVisible()
+  await expect(page.locator('[data-verdict="final-opening"]')).toContainText('VALID — AND NOTHING HIDDEN')
   await expect(page.locator('[data-claim="negative-claim"]')).toContainText('neither zero-knowledge nor succinct')
-  const openedW = parseVector(await claim(page, 'opened-W')).length
-  const openedE = parseVector(await claim(page, 'opened-E')).length
-  expect(Number(await claim(page, 'open-length'))).toBe(openedW + openedE)
+  const openedW = parseVector(await claim(page, 'opened-W'))
+  const openedE = parseVector(await claim(page, 'opened-E'))
+  expect(Number(await claim(page, 'open-length'))).toBe(openedW.length + openedE.length)
+  // The verifier accumulated Com(E') homomorphically and never saw E'. Re-committing the values
+  // the page just printed has to land on the same point, or "nothing hidden" is not a fact.
+  expect(commit(openedE).toHex()).toBe(await claim(page, 'final-commitment-e'))
 
   await page.selectOption('#step-count', '64')
   await expect(page.locator('#chain-result')).toBeHidden()
   await expect(page.locator('#chain-retirement')).toContainText('verdict retired')
   await page.getByRole('button', { name: 'Fold 64 steps' }).click()
-  await expect(page.getByText('FOLDED 64 → 1, VALID')).toBeVisible()
-  expect(await claim(page, 'chain-ops')).toBe(await claim(page, 'ops-per-fold'))
+  await expect(page.locator('[data-verdict="chain"]')).toContainText('FOLDED 64 → 1, VALID')
+  expect(Number(await claim(page, 'chain-total-ops'))).toBe(Number(await claim(page, 'chain-ops')) * 63)
 
   await page.selectOption('#step-count', '64')
-  await expect(page.getByText('FOLDED 64 → 1, VALID')).toBeVisible()
+  await expect(page.locator('[data-verdict="chain"]')).toContainText('FOLDED 64 → 1, VALID')
 })
 
 test('each attack path names the real cause and the broken mode forges', async ({ page }) => {
   await page.getByRole('button', { name: 'Tamper W′' }).click()
   await expect(page.locator('[data-claim="attack-verdict"]')).toContainText('FINAL CHECK FAILED')
-  await expect(page.locator('#attack-result')).toContainText('witness commitment and constraints disagree')
+  await expect(page.locator('#attack-result')).toContainText('the relaxed constraints and the witness commitment disagree')
 
   await page.getByRole('button', { name: 'Tamper Com(T)' }).click()
   await expect(page.locator('[data-claim="attack-verdict"]')).toContainText('TRANSCRIPT CHECK FAILED')

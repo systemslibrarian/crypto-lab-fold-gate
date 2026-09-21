@@ -1,13 +1,29 @@
 import { commitmentHex } from '../commit/pedersen'
 import { forgeAfterChallenge } from '../attack/r-first'
+import { summariseChainCost, verifierGroupOps } from '../nifs/cost'
 import { mod, scale } from '../math/field'
-import { proveFold, publicInstance, tamperCommitment } from '../nifs/prove'
-import { verifyChallenge } from '../nifs/verify'
-import { finalCheck } from '../open/final-check'
+import { proveFold, publicInstance, tamperCommitment, type PublicInstance } from '../nifs/prove'
+import { foldPublic, verifyChallenge } from '../nifs/verify'
+import { finalCheck, type FinalCheckResult } from '../open/final-check'
 import { A, B, C } from '../r1cs/matrices'
 import { residual, step, witnessVector, type RelaxedInstance } from '../r1cs/relaxed'
 
-const VERIFIER_GROUP_OPS = 5
+/**
+ * Every rendered outcome carries data-verdict="<id>" and every one of them branches on a value
+ * this file computed. e2e/verdict-mutations.ts records the mutation that kills each marker, and
+ * e2e/verdicts.spec.ts fails if a marker renders with no mutation recorded, or if verdict words
+ * or verdict styling ever render outside a marker.
+ */
+function verdict(
+  id: string,
+  tone: 'good' | 'bad' | 'alarm' | 'warning',
+  headline: string,
+  detail: string,
+  options: { claim?: string; extraClass?: string } = {},
+): string {
+  const classes = [options.extraClass, 'verdict', `verdict-${tone}`].filter(Boolean).join(' ')
+  return `<div class="${classes}" data-verdict="${id}" data-claim="${options.claim ?? id}"><span aria-hidden="true"></span><strong>${headline}</strong>${detail ? ` \u00b7 ${detail}` : ''}</div>`
+}
 
 function full(values: bigint[]): string {
   return `[${values.map(String).join(', ')}]`
@@ -35,7 +51,10 @@ function valueRow(label: string, value: bigint | bigint[], claim?: string): stri
 interface ChainResult {
   count: number
   folded: RelaxedInstance
-  valid: boolean
+  publicFolded: PublicInstance
+  opened: FinalCheckResult
+  perFoldOps: number[]
+  cost: { constant: boolean; distinct: number[]; total: number }
   finalCommitmentE: string
   challenges: bigint[]
 }
@@ -44,22 +63,33 @@ function foldChain(count: number): ChainResult {
   let rawInput = 1n
   let currentStep = step(rawInput)
   let folded = currentStep
+  // The verifier never receives W or E. It starts from the first step's public instance and
+  // advances it homomorphically with foldPublic, so the final check below compares the opened
+  // witness against a commitment the verifier accumulated -- not against a re-commitment of the
+  // same witness, which would compare a value to itself.
+  let publicFolded = publicInstance(currentStep)
   const challenges: bigint[] = []
+  const perFoldOps: number[] = []
 
   for (let index = 2; index <= count; index += 1) {
     rawInput = currentStep.x[1]
     currentStep = step(rawInput)
     const result = proveFold(folded, currentStep)
+    const publicStep = publicInstance(currentStep)
+    perFoldOps.push(verifierGroupOps(publicFolded, publicStep, result.proof.commitmentT, result.proof.challenge))
+    publicFolded = foldPublic(publicFolded, publicStep, result.proof.commitmentT, result.proof.challenge)
     folded = result.folded
     challenges.push(result.proof.challenge)
   }
 
-  const opened = finalCheck(publicInstance(folded), folded)
   return {
     count,
     folded,
-    valid: opened.valid,
-    finalCommitmentE: commitmentHex(publicInstance(folded).commitmentE),
+    publicFolded,
+    opened: finalCheck(publicFolded, folded),
+    perFoldOps,
+    cost: summariseChainCost(perFoldOps),
+    finalCommitmentE: commitmentHex(publicFolded.commitmentE),
     challenges,
   }
 }
@@ -70,9 +100,13 @@ function template(): string {
   const result = proveFold(left, right)
   const plain = { ...result.folded, E: [0n, 0n] }
   const plainResidual = residual(plain)
+  const plainSatisfied = plainResidual.every((value) => value === 0n)
+  const relaxedResidual = residual(result.folded)
+  const relaxedSatisfied = relaxedResidual.every((value) => value === 0n)
   const expectedResidual = scale(result.proof.T, result.proof.challenge)
   const publicLeft = publicInstance(left)
   const publicRight = publicInstance(right)
+  const pairOps = verifierGroupOps(publicLeft, publicRight, result.proof.commitmentT, result.proof.challenge)
 
   return `
     <div class="shell">
@@ -157,14 +191,24 @@ function template(): string {
         </div>
 
         <div class="residual-panel" data-stage-item="plain" hidden>
-          <div class="verdict verdict-bad"><span aria-hidden="true"></span><strong>NOT SATISFIED</strong> · cross term remains</div>
+          ${verdict(
+            'plain-fold',
+            plainSatisfied ? 'good' : 'bad',
+            plainSatisfied ? 'SATISFIED' : 'NOT SATISFIED',
+            plainSatisfied ? 'no cross term left over' : 'cross term remains',
+          )}
           <p>The plain random combination leaves <code data-claim="plain-residual" data-value="${full(plainResidual)}">residual = ${shortVector(plainResidual)}</code>.</p>
           <p class="equation">residual = r · T = <span data-claim="expected-residual" data-value="${full(expectedResidual)}">${shortVector(expectedResidual)}</span></p>
         </div>
 
         <div class="residual-panel residual-pass" data-stage-item="relaxed" hidden>
-          <div class="verdict verdict-good"><span aria-hidden="true"></span><strong>SATISFIED</strong> · E′ absorbed exactly r · T</div>
-          <p>The same combination now has residual <code>[0, 0]</code>. The mathematics did not disappear; it moved into the committed error vector.</p>
+          ${verdict(
+            'relaxed-fold',
+            relaxedSatisfied ? 'good' : 'bad',
+            relaxedSatisfied ? 'SATISFIED' : 'NOT SATISFIED',
+            relaxedSatisfied ? 'E′ absorbed exactly r · T' : 'E′ did not absorb r · T',
+          )}
+          <p>The same combination now has residual <code data-claim="relaxed-residual" data-value="${full(relaxedResidual)}">${shortVector(relaxedResidual)}</code>. The mathematics did not disappear; it moved into the committed error vector.</p>
         </div>
 
         <div class="walk-controls">
@@ -192,7 +236,7 @@ function template(): string {
           </div>
           <div class="verifier-arrow" aria-hidden="true"></div>
           <div class="verifier-result">
-            <span class="meter-number" data-claim="ops-per-fold" data-value="${VERIFIER_GROUP_OPS}">${VERIFIER_GROUP_OPS}</span>
+            <span class="meter-number" data-claim="ops-per-fold" data-value="${pairOps}">${pairOps}</span>
             <span>group operations<br />per fold<br /><code data-claim="pair-commitment-e" data-value="${commitmentHex(result.publicFolded.commitmentE)}" title="${commitmentHex(result.publicFolded.commitmentE)}">Com(E′) ${shortCommitment(commitmentHex(result.publicFolded.commitmentE))}</code></span>
           </div>
         </div>
@@ -226,7 +270,7 @@ function template(): string {
             <div class="work-meter">
               <span>PER FOLD</span>
               <div class="meter-track"><i style="width:24%"></i></div>
-              <strong>${VERIFIER_GROUP_OPS} group ops</strong>
+              <strong data-claim="meter-ops-per-fold" data-value="${pairOps}">${pairOps} group ops</strong>
             </div>
             <div class="work-meter">
               <span>FINAL OPEN</span>
@@ -425,12 +469,36 @@ export function mountApp(root: HTMLElement | null): void {
       latestChain = foldChain(count)
       lastRunCount = count
       chainResult.hidden = false
+      const chain = latestChain
+      const failing = [
+        chain.opened.constraintValid ? '' : 'the relaxed constraints',
+        chain.opened.witnessCommitmentValid ? '' : 'Com(W′)',
+        chain.opened.errorCommitmentValid ? '' : 'Com(E′)',
+      ].filter(Boolean)
       chainResult.innerHTML = `
-        <div class="chain-verdict verdict verdict-good" data-claim="chain-verdict"><span aria-hidden="true"></span><strong>FOLDED ${count} → 1, VALID</strong></div>
+        ${verdict(
+          'chain',
+          chain.opened.valid ? 'good' : 'bad',
+          `FOLDED ${count} → 1, ${chain.opened.valid ? 'VALID' : 'INVALID'}`,
+          chain.opened.valid
+            ? 'constraints and both accumulated commitments agree'
+            : failing.length > 0
+              ? `${failing.join(' and ')} did not check out`
+              : 'the composite final check did not pass',
+          { claim: 'chain-verdict', extraClass: 'chain-verdict' },
+        )}
+        ${verdict(
+          'chain-cost',
+          chain.cost.constant ? 'good' : 'warning',
+          chain.cost.constant
+            ? `PER-FOLD VERIFIER COST CONSTANT AT ${chain.cost.distinct[0]}`
+            : `PER-FOLD VERIFIER COST VARIED OVER ${chain.cost.distinct.join(', ')}`,
+          `measured across ${chain.perFoldOps.length} folds \u00b7 <span data-claim="chain-total-ops" data-value="${chain.cost.total}">${chain.cost.total}</span> group operations in total, plus one final check`,
+        )}
         <div class="chain-stats">
           <div><span>STEPS ABSORBED</span><strong>${count}</strong></div>
-          <div><span>GROUP OPS / FOLD</span><strong data-claim="chain-ops" data-value="${VERIFIER_GROUP_OPS}">${VERIFIER_GROUP_OPS}</strong></div>
-          <div><span>FOLDED W LENGTH</span><strong data-claim="folded-w-length" data-value="${latestChain.folded.W.length}">${latestChain.folded.W.length}</strong></div>
+          <div><span>GROUP OPS / FOLD</span><strong data-claim="chain-ops" data-value="${chain.cost.distinct.join(',')}">${chain.cost.distinct.join(', ')}</strong></div>
+          <div><span>FOLDED W LENGTH</span><strong data-claim="folded-w-length" data-value="${chain.folded.W.length}">${chain.folded.W.length}</strong></div>
           <div><span>ONE-STEP W LENGTH</span><strong data-claim="step-w-length" data-value="${step(1n).W.length}">${step(1n).W.length}</strong></div>
         </div>
         <div class="history-bar" role="img" aria-label="${count} folded steps">${Array.from({ length: count }, (_, index) => `<i style="--i:${index}" title="Step ${index + 1}"></i>`).join('')}</div>
@@ -445,7 +513,19 @@ export function mountApp(root: HTMLElement | null): void {
       root.querySelector<HTMLButtonElement>('#open-final')?.addEventListener('click', (event) => {
         if (!latestChain) return
         const opening = root.querySelector<HTMLElement>('#opening-result')!
-        const openLength = latestChain.folded.W.length + latestChain.folded.E.length
+        // The two values printed below are the whole of the private state. `explained` says the
+        // verifier's accumulated Com(W′) and Com(E′) are reproduced by exactly those printed
+        // values and nothing else -- no blinding factor is withheld. That is what makes the
+        // opening a full reveal rather than a zero-knowledge proof, and it is measured, not
+        // asserted: a blinded commitment would not reopen from the printed values alone.
+        const revealed = [...latestChain.folded.W, ...latestChain.folded.E]
+        const openLength = revealed.length
+        const explained = latestChain.opened.witnessCommitmentValid && latestChain.opened.errorCommitmentValid
+        const openingVerdict = !explained
+          ? verdict('final-opening', 'bad', 'OPENING REJECTED', 'the printed values do not reproduce the verifier’s commitments', { claim: 'negative-verdict' })
+          : !latestChain.opened.valid
+            ? verdict('final-opening', 'bad', 'FINAL CHECK FAILED', 'the opened instance does not satisfy the relaxed constraints', { claim: 'negative-verdict' })
+            : verdict('final-opening', 'warning', 'VALID — AND NOTHING HIDDEN', 'the printed values alone reopen both commitments', { claim: 'negative-verdict' })
         opening.hidden = false
         opening.innerHTML = `
           <div class="opening-grid">
@@ -453,9 +533,9 @@ export function mountApp(root: HTMLElement | null): void {
             ${valueRow('Error E′', latestChain.folded.E, 'opened-E')}
           </div>
           <div class="negative-fixture">
-            <div class="verdict verdict-warning" data-claim="negative-verdict"><span aria-hidden="true"></span><strong>VALID — AND NOTHING HIDDEN</strong></div>
-            <p data-claim="negative-claim">The NIFS built here is neither zero-knowledge nor succinct on its own: the final check opens the full folded witness, and that witness is as long as one step’s witness plus the error vector.</p>
-            <p>Opened length: <strong data-claim="open-length" data-value="${openLength}">${openLength}</strong> = one-step W length <strong>${step(1n).W.length}</strong> + |E| <strong>${latestChain.folded.E.length}</strong>. Verifier work per fold is constant; this final open is linear in one step.</p>
+            ${openingVerdict}
+            <p data-claim="negative-claim">The NIFS built here is neither zero-knowledge nor succinct on its own: the verifier’s accumulated commitments reopen from the ${openLength} values printed above, so nothing stays hidden, and the final step is that witness opening rather than a short proof.</p>
+            <p>Opened length: <strong data-claim="open-length" data-value="${openLength}">${openLength}</strong> = one-step W length <strong>${step(1n).W.length}</strong> + |E| <strong>${latestChain.folded.E.length}</strong>. Verifier work per fold is constant; this final open is one step wide however many steps were folded.</p>
           </div>
         `
         ;(event.currentTarget as HTMLButtonElement).disabled = true
@@ -474,16 +554,42 @@ export function mountApp(root: HTMLElement | null): void {
         const changed = { ...honest.folded, W: [...honest.folded.W] }
         changed.W[0] = mod(changed.W[0] + 1n)
         const check = finalCheck(honest.publicFolded, changed)
-        attackResult.innerHTML = `<div class="verdict verdict-good" data-claim="attack-verdict"><span aria-hidden="true"></span><strong>FINAL CHECK FAILED</strong> · witness commitment and constraints disagree</div><p>The tamper was caught. A failed adversarial attempt is an integrity success.</p><span class="visually-hidden">Verifier returned ${check.valid}.</span>`
+        const broke = [
+          check.constraintValid ? '' : 'the relaxed constraints',
+          check.witnessCommitmentValid ? '' : 'the witness commitment',
+        ].filter(Boolean)
+        attackResult.innerHTML = `${verdict(
+          'attack-witness',
+          check.valid ? 'alarm' : 'good',
+          check.valid ? 'TAMPER ACCEPTED' : 'FINAL CHECK FAILED',
+          check.valid ? 'the altered witness opened against the original commitment' : `${broke.join(' and ')} disagree`,
+          { claim: 'attack-verdict' },
+        )}<p>${check.valid ? 'The altered witness was not caught. That is a break, not a demonstration.' : 'The tamper was caught. A failed adversarial attempt is an integrity success.'}</p><span class="visually-hidden">Verifier returned ${check.valid}.</span>`
       } else if (button.dataset.attack === 'commitment') {
         const accepted = verifyChallenge(publicInstance(left), publicInstance(right), tamperCommitment(honest.proof.commitmentT), honest.proof.challenge)
-        attackResult.innerHTML = `<div class="verdict verdict-good" data-claim="attack-verdict"><span aria-hidden="true"></span><strong>TRANSCRIPT CHECK FAILED</strong> · Com(T) changed after r</div><p>The tamper was caught before folding because the recomputed challenge no longer matches.</p><span class="visually-hidden">Verifier returned ${accepted}.</span>`
+        attackResult.innerHTML = `${verdict(
+          'attack-commitment',
+          accepted ? 'alarm' : 'good',
+          accepted ? 'TAMPERED Com(T) ACCEPTED' : 'TRANSCRIPT CHECK FAILED',
+          accepted ? 'the transcript did not bind Com(T) to r' : 'Com(T) changed after r',
+          { claim: 'attack-verdict' },
+        )}<p>${accepted ? 'The substituted commitment still recomputed to the same challenge.' : 'The tamper was caught before folding because the recomputed challenge no longer matches.'}</p><span class="visually-hidden">Verifier returned ${accepted}.</span>`
       } else {
         const bad = step(5n)
         bad.x[1] = mod(bad.x[1] + 9n)
         const before = residual(bad)
+        // Both halves are computed: the hidden step really has to be unsatisfying, and the
+        // forged opening really has to pass the same finalCheck the honest path uses.
+        const wasUnsatisfying = before.some((value) => value !== 0n)
         const forgery = forgeAfterChallenge(left, bad, 17n)
-        attackResult.innerHTML = `<div class="verdict verdict-alarm" data-claim="attack-verdict"><span aria-hidden="true"></span><strong>ACCEPTED — AND FORGED</strong></div><p>The hidden step was unsatisfying with residual <code>${shortVector(before)}</code>, yet the folded instance passed. Learning r first let the prover solve backward for T. This broken mode is not Nova NIFS.</p><p class="equation">forged T = (E′ − E₁ − r²E₂) / r = ${shortVector(forgery.forgedT)}</p>`
+        const forged = wasUnsatisfying && forgery.accepted
+        attackResult.innerHTML = `${verdict(
+          'attack-r-first',
+          forged ? 'alarm' : 'good',
+          forged ? 'ACCEPTED — AND FORGED' : 'FORGERY REFUSED',
+          forged ? 'an unsatisfying step passed the final check' : wasUnsatisfying ? 'the forged opening did not pass the final check' : 'the hidden step was satisfying, so nothing was forged',
+          { claim: 'attack-verdict' },
+        )}<p>The hidden step was <span data-claim="hidden-residual" data-value="${full(before)}">${wasUnsatisfying ? 'unsatisfying' : 'satisfying'}</span> with residual <code>${shortVector(before)}</code>, and the folded instance ${forgery.accepted ? 'passed' : 'did not pass'}. Learning r first let the prover solve backward for T. This broken mode is not Nova NIFS.</p><p class="equation">forged T = (E′ − E₁ − r²E₂) / r = ${shortVector(forgery.forgedT)}</p>`
       }
     })
   })

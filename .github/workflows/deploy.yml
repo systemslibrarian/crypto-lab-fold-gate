@@ -31,17 +31,33 @@ jobs:
       - name: Coverage thresholds (the README advertises these as a gate)
         run: npm run test:coverage
       - run: npm run build
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-      - name: Accessibility and claims gate
-        run: npm run test:a11y
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
+  # Separate, required, and blocking on purpose. Every rendered verdict carries a data-verdict
+  # marker; this job fails if any marker has no recorded mutation that kills it, if a recorded
+  # mutation names a marker the page no longer renders, or if verdict words or verdict styling
+  # are painted outside a marker. Branch protection requires this check by name, so it also
+  # stands in front of a direct push to main, not only in front of a pull request.
+  verdict-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Verdict coverage, rendered claims, and accessibility gate
+        run: npm run test:a11y
+
   deploy:
-    needs: build
+    needs: [build, verdict-coverage]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -54,7 +70,7 @@ jobs:
         uses: actions/deploy-pages@v5
 
   dependabot-auto-merge:
-    needs: build
+    needs: [build, verdict-coverage]
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10

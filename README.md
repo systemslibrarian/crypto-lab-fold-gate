@@ -14,8 +14,8 @@ The arithmetic and group operations are real. The lab deliberately uses one curv
 
 1. **Fold walkthrough** starts with two satisfying R1CS instances, demonstrates the failed plain combination, reveals $T$, derives $r$, and shows $E' = E_1 + rT + r^2E_2$ restoring satisfaction.
 2. **Verifier lane** exposes only $u$, public inputs, and commitments to $E$, $W$, and $T$. Private witness and error vectors do not cross the NIFS verifier boundary.
-3. **Multi-step fold** executes and folds 2, 4, 8, 16, 32, or 64 real $x^3 + 3$ steps while the displayed group-operation count per fold stays fixed.
-4. **Final opening** checks the folded constraints and both commitments, then demonstrates that this NIFS alone is neither zero-knowledge nor a succinct final proof.
+3. **Multi-step fold** executes and folds 2, 4, 8, 16, 32, or 64 real $x^3 + 3$ steps, measuring the verifier's group-operation cost at each individual fold and reporting the measured per-fold figure, whether it stayed constant across the chain, and what the whole chain cost.
+4. **Final opening** recomputes the folded residual and re-derives $Com(W')$ and $Com(E')$ from the values it prints, against the commitments the verifier accumulated with `foldPublic` and never saw a witness for. Because those printed values alone reopen both commitments, nothing is withheld: this NIFS alone is neither zero-knowledge nor a succinct final proof.
 5. **Break it yourself** catches witness tampering and post-transcript $T$ tampering, then demonstrates a successful forgery when a broken verifier reveals $r$ before $T$ is committed.
 6. **Inspectable internals** publish the matrices, witness layout, transcript order, generator DST, edge-case policy, and extension boundaries.
 
@@ -67,21 +67,42 @@ npm run preview
 ## Build & Verify
 
 ```bash
-npm test               # 13 unit/property tests
+npm test               # 18 unit/property tests
 npm run test:coverage  # V8 statement/branch/function/line coverage
 npm run build          # strict TypeScript + Vite production build
-npm run test:a11y      # 8 production-browser accessibility and claims tests
+npm run test:a11y      # 15 production-browser verdict, claims, and accessibility tests
 ```
 
-The 13 unit tests cover exact cross-term absorption, 64 deterministic field samples, repeated folds, malformed vectors, commitment homomorphism, generator derivation, transcript binding, verifier isolation, final opening, tampering, and the challenge-first forgery. Coverage is gated at 95% statements/lines, 85% branches, and 85% functions across the cryptographic modules. The 8 Playwright tests independently recompute displayed R1CS claims with `BigInt`, compare the rendered folded error commitment, exercise verdict retirement and its no-op guard, prove the negative claim, check real UI states with axe, compute text and control contrast, and check mobile overflow.
+The 18 unit tests cover exact cross-term absorption, 64 deterministic field samples, repeated folds, malformed vectors, commitment homomorphism, generator derivation, transcript binding, verifier isolation, final opening, tampering, the challenge-first forgery, and the verifier cost instrumentation. Coverage is gated at 95% statements/lines, 85% branches, and 85% functions across the cryptographic modules. The 15 Playwright tests independently recompute displayed R1CS claims with `BigInt`, compare the rendered folded error commitment against a re-commitment of the opened values, count the real `foldPublic` group operations with a stand-in written for the test alone, exercise verdict retirement and its no-op guard, check real UI states with axe, compute text and control contrast, and check mobile overflow.
 
 **KAT count: 0.** The supplied Nova construction does not publish a standardized NIFS known-answer vector for this toy R1CS. The lab does not invent one; it uses algebraic property tests, independent browser re-derivation, and deterministic RFC 9380 generator checks instead.
 
 The accessibility gate runs against `vite preview` on the committed unique port `4695`. It is a real-state gate with reduced-motion emulation, axe A/AA plus incomplete-result rejection, arithmetic contrast oracles, and a `[hidden]` paint probe.
 
+## Every Rendered Verdict Is Computed, And Proved So
+
+Each outcome this lab paints carries a `data-verdict` marker, and each one branches on a value the
+page computed — no verdict text is printed unconditionally. `e2e/verdict-mutations.ts` records, per
+marker, the mutation that makes it go red, the verbatim passing baseline from the unmutated run,
+and the verbatim failure. `e2e/verdicts.spec.ts` derives coverage from the rendered page rather
+than from any list: it walks every state the lab can reach, and fails if a marker has no recorded
+mutation, if a recorded mutation names a marker that no longer renders, or if verdict words or
+verdict styling are painted anywhere outside a marker. That job — `verdict-coverage` — is a
+required check and `deploy` depends on it, so it blocks a direct push to `main` as well as a pull
+request.
+
+Two things this replaced are worth naming. The chain, final-opening and three attack verdicts used
+to be fixed strings: forcing `finalCheck` to return `valid: false` left every browser test green
+and the page still read "FOLDED 8 → 1, VALID". And the final check compared `commit(W')` against a
+commitment derived from that same `W'`, so its commitment half could not fail; the verifier now
+accumulates $Com(W')$ and $Com(E')$ homomorphically through the chain and the final check compares
+against those.
+
 ## Performance
 
-The verifier performs a fixed five group operations per fold in this teaching construction. The final check commits and opens one step-width witness plus the error vector; its cost does not grow with the number of folded steps, but it is not a succinct proof. No comparison with production Nova implementations is claimed.
+The verifier performs **six** ristretto255 group operations per fold in this teaching construction — three scalar multiplications and three point additions — measured by running the real `foldPublic` over instrumented points, not asserted by a constant. Earlier versions of this file said five; that figure was hard-coded and wrong, and the page now renders the measurement.
+
+Per-fold cost is what stays constant. Total verifier work is not: this lab builds the NIFS only, so the verifier performs every fold itself, and folding eight steps means seven folds — 42 group operations — plus one final check. Collapsing a whole chain into a single verifier step is IVC's property, which needs the augmented recursive circuit this lab deliberately does not build. The final check commits and opens one step-width witness plus the error vector; that cost does not grow with the number of folded steps, but it is not a succinct proof. No comparison with production Nova implementations is claimed.
 
 ## References
 

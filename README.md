@@ -70,26 +70,42 @@ npm run preview
 npm test               # 18 unit/property tests
 npm run test:coverage  # V8 statement/branch/function/line coverage
 npm run build          # strict TypeScript + Vite production build
-npm run test:a11y      # 15 production-browser verdict, claims, and accessibility tests
+npm run test:a11y      # 17 production-browser verdict, claims, and accessibility tests
 ```
 
-The 18 unit tests cover exact cross-term absorption, 64 deterministic field samples, repeated folds, malformed vectors, commitment homomorphism, generator derivation, transcript binding, verifier isolation, final opening, tampering, the challenge-first forgery, and the verifier cost instrumentation. Coverage is gated at 95% statements/lines, 85% branches, and 85% functions across the cryptographic modules. The 15 Playwright tests independently recompute displayed R1CS claims with `BigInt`, compare the rendered folded error commitment against a re-commitment of the opened values, count the real `foldPublic` group operations with a stand-in written for the test alone, exercise verdict retirement and its no-op guard, check real UI states with axe, compute text and control contrast, and check mobile overflow.
+The 18 unit tests cover exact cross-term absorption, 64 deterministic field samples, repeated folds, malformed vectors, commitment homomorphism, generator derivation, transcript binding, verifier isolation, final opening, tampering, the challenge-first forgery, and the verifier cost instrumentation. Coverage is gated at 95% statements/lines, 85% branches, and 85% functions across the cryptographic modules. The 17 Playwright tests independently recompute displayed R1CS claims with `BigInt`, compare the rendered folded error commitment against a re-commitment of the opened values, count the real `foldPublic` group operations with a stand-in written for the test alone, exercise verdict retirement and its no-op guard, check real UI states with axe, compute text and control contrast, and check mobile overflow.
 
 **KAT count: 0.** The supplied Nova construction does not publish a standardized NIFS known-answer vector for this toy R1CS. The lab does not invent one; it uses algebraic property tests, independent browser re-derivation, and deterministic RFC 9380 generator checks instead.
 
 The accessibility gate runs against `vite preview` on the committed unique port `4695`. It is a real-state gate with reduced-motion emulation, axe A/AA plus incomplete-result rejection, arithmetic contrast oracles, and a `[hidden]` paint probe.
 
-## Every Rendered Verdict Is Computed, And Proved So
+## Every Rendered Verdict And Every Rendered Number Is Computed, And Proved So
 
-Each outcome this lab paints carries a `data-verdict` marker, and each one branches on a value the
-page computed — no verdict text is printed unconditionally. `e2e/verdict-mutations.ts` records, per
-marker, the mutation that makes it go red, the verbatim passing baseline from the unmutated run,
-and the verbatim failure. `e2e/verdicts.spec.ts` derives coverage from the rendered page rather
-than from any list: it walks every state the lab can reach, and fails if a marker has no recorded
-mutation, if a recorded mutation names a marker that no longer renders, or if verdict words or
-verdict styling are painted anywhere outside a marker. That job — `verdict-coverage` — is a
-required check and `deploy` depends on it, so it blocks a direct push to `main` as well as a pull
-request.
+Each outcome this lab paints carries a `data-verdict` marker and each measurement carries a
+`data-claim` marker, and every one of them branches on a value the page computed — nothing is
+printed unconditionally. `e2e/verdict-mutations.ts` records, per marker of either family, the
+mutation that makes it go red, the verbatim passing baseline from the unmutated run, and the
+verbatim failure. `e2e/verdicts.spec.ts` derives coverage from the rendered page rather than from
+any list, and fails if a marker has no recorded mutation, if a recorded mutation names a marker
+that no longer renders, or if verdict words, verdict styling, or a bare rendered number are
+painted in a result region outside any marker. That job — `verdict-coverage` — is a required check
+and `deploy` depends on it, so it blocks a direct push to `main` as well as a pull request.
+
+Three things make that a real gate rather than a shape:
+
+- **A marker's words, its `data-result` and its styling are ONE claim**, asserted together by
+  `expectVerdict()` in `e2e/markers.ts`. The coverage test requires each record's `killedBy` test
+  to go through that helper (or `expectClaim()` for a measurement), so a mutation that flips the
+  sentence while the marker keeps saying pass in every way a reader can see is a build failure,
+  not a recorded kill.
+- **A number is a claim too, and an easier one to ship unchecked**, because a number does not look
+  like a claim. Marking the measurements found four numbers the page painted with nothing behind
+  them, one of which — the FINAL OPEN meter — was a hand-written `1 W + 1 E` that disagreed with
+  the page's own opened length of one W and two E.
+- **The walk is the denominator.** `driveEveryState` visits every option of every control that
+  changes what renders — all six step counts, not just the default — each control on its own
+  rather than the cross-product. A marker that renders only at 64 steps is outside the set the
+  coverage rules judge unless the walk reaches it, however carefully those rules are written.
 
 Two things this replaced are worth naming. The chain, final-opening and three attack verdicts used
 to be fixed strings: forcing `finalCheck` to return `valid: false` left every browser test green

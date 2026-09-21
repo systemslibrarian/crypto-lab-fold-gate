@@ -60,11 +60,9 @@ npm run preview
 
 ## Related Demos
 
-- [SNARK Arena](https://crypto-lab.systemslibrarian.dev/) for proof-system tradeoffs and final compression context.
-- [Polynomial Forge](https://crypto-lab.systemslibrarian.dev/) for polynomial commitment mechanics.
-- [STARK Tower](https://crypto-lab.systemslibrarian.dev/) for a contrasting transparent proof architecture.
-
-These catalog references were named in the build brief. The sibling repositories were not mounted during implementation, so no code was imported from them and the proposed catalog category or chip was not modified here.
+- [SNARK Arena](https://systemslibrarian.github.io/crypto-lab-snark-arena/) for proof-system tradeoffs and final compression context.
+- [Polynomial Forge](https://systemslibrarian.github.io/crypto-lab-polynomial-forge/) for polynomial commitment mechanics.
+- [STARK Tower](https://systemslibrarian.github.io/crypto-lab-stark-tower/) for a contrasting transparent proof architecture.
 
 ## Build & Verify
 
@@ -79,7 +77,7 @@ The 13 unit tests cover exact cross-term absorption, 64 deterministic field samp
 
 **KAT count: 0.** The supplied Nova construction does not publish a standardized NIFS known-answer vector for this toy R1CS. The lab does not invent one; it uses algebraic property tests, independent browser re-derivation, and deterministic RFC 9380 generator checks instead.
 
-The accessibility gate runs against `vite preview` on the committed unique port `4667`. No sibling lab repositories were present in the workspace during the required pre-build scan, so no duplicate concept or conflicting committed port was found, and the mandated `crypto-lab-schnorr-forge` gate could not be copied. This repository carries an equivalent real-state gate with reduced-motion emulation, axe A/AA plus incomplete-result rejection, arithmetic contrast oracles, and a `[hidden]` paint probe.
+The accessibility gate runs against `vite preview` on the committed unique port `4695`. It is a real-state gate with reduced-motion emulation, axe A/AA plus incomplete-result rejection, arithmetic contrast oracles, and a `[hidden]` paint probe.
 
 ## Performance
 

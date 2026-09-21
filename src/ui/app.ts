@@ -330,7 +330,7 @@ function template(): string {
             <ul>
               <li>No augmented recursive-verifier circuit, so this is not IVC by itself.</li>
               <li>No curve cycle or CycleFold.</li>
-              <li>No compressing SNARK; see <a href="https://crypto-lab.systemslibrarian.dev/">SNARK Arena and Polynomial Forge</a>.</li>
+              <li>No compressing SNARK; see <a href="https://systemslibrarian.github.io/crypto-lab-snark-arena/">SNARK Arena</a> and <a href="https://systemslibrarian.github.io/crypto-lab-polynomial-forge/">Polynomial Forge</a>.</li>
               <li>No zero-knowledge blinding: the final check opens the witness.</li>
               <li>No HyperNova, ProtoStar, lookups, or production performance claims.</li>
             </ul>

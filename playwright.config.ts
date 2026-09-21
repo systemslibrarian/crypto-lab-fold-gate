@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-const port = 4667
+const port = 4695
 const baseURL = `http://127.0.0.1:${port}/crypto-lab-fold-gate/`
 
 export default defineConfig({

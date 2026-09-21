@@ -28,6 +28,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Coverage thresholds (the README advertises these as a gate)
+        run: npm run test:coverage
       - run: npm run build
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
@@ -63,13 +65,31 @@ jobs:
     steps:
       - id: meta
         uses: dependabot/fetch-metadata@v3
+      - name: Record what is being merged
+        # Policy is deliberately "the gate decides, not the version number", so this
+        # does not gate anything -- but the run log must say which update type was
+        # auto-merged, or a major landing here leaves no trace of having been one.
+        run: |
+          echo "update-type: ${UPDATE_TYPE:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+          echo "dependencies: ${DEPS:-unknown}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPS: ${{ steps.meta.outputs.dependency-names }}
       - name: Merge any bump whose gate went green
         run: |
           for attempt in 1 2 3; do
             gh pr merge --squash --delete-branch "$PR_URL" && merged=1 && break
             sleep 15
           done
-          [ -n "$merged" ] || { echo "::warning::gate passed, merge did not land"; exit 0; }
+          if [ -z "$merged" ]; then
+            state=$(gh pr view "$PR_URL" --json state --jq .state)
+            if [ "$state" = "MERGED" ]; then
+              merged=1
+            else
+              echo "::error::gate passed but the merge did not land after 3 attempts (PR state: $state)"
+              exit 1
+            fi
+          fi
           gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

@@ -5,6 +5,13 @@ updates:
     schedule: { interval: "weekly" }
     open-pull-requests-limit: 5
     groups:
+      # vitest and @vitest/coverage-v8 are lockstep peers: coverage-v8 declares an
+      # exact peer on the matching vitest. Left to the minor/patch group below, their
+      # MAJOR bumps arrive as two separate PRs and neither can install on its own --
+      # `npm ci` dies with ERESOLVE, both gates go red, and the pair is deadlocked
+      # forever. This group is listed first so it claims them at every update type.
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
       npm-minor-and-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]

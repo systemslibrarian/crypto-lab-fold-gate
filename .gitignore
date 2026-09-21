@@ -5,3 +5,6 @@ test-results/
 playwright-report/
 .vite/
 *.log
+template.md
+_MASTER-TEMPLATE.md
+CRYPTO-LAB-TEMPLATE.md

@@ -1,14 +1,15 @@
 # Fold Gate — build brief for `crypto-lab-fold-gate`
 
-Save this file as `brief.md` at the root of `crypto-lab-fold-gate`. The binding spec is the copy of `_MASTER-TEMPLATE.md` in this repo (status 2026-08-02); this brief supplies only the demo-specific facts. Where the two touch, the template wins; where the template and the catalog `CLAUDE.md` touch, `CLAUDE.md` wins. If `audits/kickoff.md` is also present in this repo, it may be used instead of the prompt below — it reads `./brief.md` itself.
+Save this file as `brief.md` at the root of `crypto-lab-fold-gate`. The binding spec is `audits/_MASTER-TEMPLATE.md` in the catalog repo (`crypto-lab`) — read it there, not from a copy. A working copy may sit untracked at this repo's root for convenience; it is a snapshot and ages, so it is never the authority. This brief supplies only the demo-specific facts. Where the two touch, the template wins; where the template and the catalog `CLAUDE.md` touch, `CLAUDE.md` wins. If `audits/kickoff.md` is also present in this repo, it may be used instead of the prompt below — it reads `./brief.md` itself.
 
 ## Kickoff prompt — paste this, with the template in the repo
 
 ```text
 Build a new Crypto Lab browser demo (Vite + TypeScript, static site, no backend).
 
-Read _MASTER-TEMPLATE.md (copied into this repo — check audits/ and the repo root) in
-full and treat it as the BINDING spec. Build to every standard in it, in this order:
+Read audits/_MASTER-TEMPLATE.md in the crypto-lab catalog repo in full and treat it
+as the BINDING spec (an untracked copy at this repo's root is a convenience snapshot,
+not the authority). Build to every standard in it, in this order:
 
   1. §1 Build — real crypto only (WebCrypto or a named, justified library; hand-roll
      the inspectable teaching parts; NEVER simulate or fake math). Runnable tests that

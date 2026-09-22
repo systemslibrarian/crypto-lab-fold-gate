@@ -12,22 +12,52 @@
  *
  * e2e/verdicts.spec.ts walks every option of every control that changes what renders, and fails if
  * any marker of either family has no record here, if any record names a marker the page no longer
- * renders, or if a record's `killedBy` test does not assert that marker through
- * expectVerdict(page, '<id>', …) / expectClaim(page, '<id>', …). A mention is not an assertion, and
- * a text-only assertion is not a kill: a marker's words, its data-result and its styling are ONE
- * claim, and the mutation has to flip all of it.
+ * renders, or if a record's killing assertion is handed an expectation read off that same marker.
+ * e2e/coverage-replay.spec.ts then fails if a record's killing assertion did not ACTUALLY RUN —
+ * the helpers record the (test title, marker) pairs they execute, and that project reads them back
+ * once the suite is over. A mention is not an assertion, and a text-only assertion is not a kill:
+ * a marker's words, its data-result and its styling are ONE claim, and the mutation has to flip
+ * all of it.
  *
- * Those four rules were themselves mutated, because a rule nobody has watched fail is a shape:
+ * Those rules were themselves mutated, because a rule nobody has watched fail is a shape:
  *
  * - Flip ONLY `data-result` on the chain verdict, leaving its words and its styling correct.
  *   `chain says "FOLDED 8 → 1, VALID · constraints and both accumulated commitments agree" but its
  *   data-result disagrees | Expected: "pass" | Received: "fail"`. A text-only assertion passes this
  *   page. That is the gap this file's helper closes.
  * - Route one kill around the helper (`expectVerdict(page, ('chain'), …)`). Coverage fails:
- *   `chain's kill is validated somewhere other than expectVerdict(page, 'chain', …)`.
+ *   `chain's kill is not even written as expectVerdict(page, 'chain', …) inside "the chain verdict
+ *   follows the final check"`.
  * - Ship a measurement marker with no record. Coverage fails, naming `smuggled-measurement`.
  * - Paint `${count} folds` in the chain stats with no marker around it. The outside-marker rule
  *   fails with all six step counts listed: `"<strong class=\"\"> 2 folds"` … `"64 folds"`.
+ *
+ * Three more, added 2026-09-22 under decision D6, because the rule that a record's kill "goes
+ * through the helper" was until then a scan of the spec's SOURCE TEXT, and a mention is not an
+ * execution. Each was run twice in isolated trees — once at ee829a1 where the rule was the source
+ * scan, once at the commit that replaced it — with the same page mutation in both, so the
+ * difference is the rule and not the patch:
+ *
+ * - COMMENT THE CALL OUT and flip ONLY `data-result` on the chain verdict. The rendered DOM reads
+ *   `{"result":"fail","className":"chain-verdict verdict verdict-good","text":"FOLDED 8 → 1, VALID
+ *   · constraints and both accumulated commitments agree"}` — a page whose machine-readable result
+ *   contradicts its own sentence. Under the source scan: **17 passed**. Under the replay:
+ *   `chain: no expectVerdict(page, 'chain', …) executed inside "the chain verdict follows the final
+ *   check"`, 2 failed.
+ * - KEEP THE CALL AND MAKE IT TAUTOLOGICAL — read text, data-result and tone off the marker in the
+ *   same test and hand them back to the helper — with the same `data-result` flip live. The
+ *   assertion runs, so the replay is satisfied; it names the right helper, so the source scan is
+ *   satisfied. Under the source scan: **17 passed**. Under the oracle-independence rule:
+ *   `expectVerdict(page, 'chain', …) is handed an expectation built from `live`, which came from
+ *   reading [chain] itself, so it would pass on any page, mutated or not`.
+ * - SATISFY IT FROM A CALL THAT NEVER RUNS. Put the killing assertion behind
+ *   `if (process.env.NEVER_SET === 'yes')` in its own test, assert the text alone outside it, and
+ *   flip `data-result`. The text scan is body-granular here and sees the call, so under it:
+ *   **17 passed**. Under the replay: the same `no expectVerdict(page, 'chain', …) executed` line.
+ *   Moving the call to a DIFFERENT test in the same file fails both — and with the source scan
+ *   deliberately disabled, the replay still failed it alone while its companion test, which asks
+ *   only whether the marker was asserted ANYWHERE, passed. That pair is the distinction: the rule
+ *   is keyed on (test, marker), not on the file and not on the marker.
  *
  * And the walk itself is load-bearing, which is the one that cannot be fixed by writing the rules
  * more carefully. A marker rendered only at 64 steps fails coverage as `only-at-64`; the SAME page

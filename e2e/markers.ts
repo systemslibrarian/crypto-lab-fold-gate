@@ -1,12 +1,20 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { recordObservation } from './observed'
 
 /**
  * The shared marker vocabulary for this lab's verdict gate.
  *
  * Two families of marker are held to one rule. `data-verdict="<id>"` is a rendered decision;
  * `data-claim="<id>"` is a rendered measurement. Both must have a recorded, actually-run mutation
- * in verdict-mutations.ts, and both are asserted through the helpers below so that the coverage
- * test can require a record's `killedBy` test to go through them rather than merely mention an id.
+ * in verdict-mutations.ts, and both are asserted through the helpers below.
+ *
+ * Both helpers RECORD the `(test title, marker)` pair they are executing, into the run-scoped sink
+ * in observed.ts, and e2e/coverage-replay.spec.ts requires every recorded mutation's pair to turn
+ * up there. That is the whole point of routing every assertion through them: a scan of the spec's
+ * source can only establish that a call was WRITTEN, and a call inside a comment, in a branch that
+ * never runs, or in some other test in the same file is written without being run. The pair is
+ * recorded BEFORE the marker is looked for, because what is being established is that the
+ * assertion was reached, not that it succeeded.
  *
  * `expectVerdict` exists because a marker's words, its `data-result` and its pass/fail styling are
  * ONE claim. Asserting the text alone accepts a mutation that flips the sentence while the marker
@@ -107,6 +115,7 @@ export interface VerdictExpectation {
  * of those in one test walk it into the test timeout — which is neither a kill nor a survivor.
  */
 export async function expectVerdict(page: Page, id: string, expected: VerdictExpectation): Promise<void> {
+  recordObservation(test.info().title, 'verdict', id)
   const marker = page.locator(`[data-verdict="${id}"]`)
   await expect(marker, `[data-verdict="${id}"] does not render`).toBeVisible()
   const seen = await marker.evaluate((element) => ({
@@ -138,6 +147,7 @@ export interface ClaimExpectation {
 
 /** Asserts one rendered measurement against an oracle this suite computed for itself. */
 export async function expectClaim(page: Page, id: string, expected: ClaimExpectation): Promise<void> {
+  recordObservation(test.info().title, 'claim', id)
   const marker = page.locator(`[data-claim="${id}"]`).first()
   await expect(marker, `[data-claim="${id}"] does not render`).toBeAttached()
   if (expected.value !== undefined) {

@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 import { proveFold, publicInstance, type PublicInstance } from '../src/nifs/prove'
 import { foldPublic } from '../src/nifs/verify'
 import { step } from '../src/r1cs/relaxed'
+import { oracleDependenceFailures, testBodies } from './coverage-rules'
 import { openLab } from './gate'
 import { driveEveryState, expectClaim, expectVerdict, foldChain, stepOf } from './markers'
 import { CLAIM_MUTATIONS, VERDICT_MUTATIONS } from './verdict-mutations'
@@ -13,9 +14,17 @@ import { CLAIM_MUTATIONS, VERDICT_MUTATIONS } from './verdict-mutations'
  * walk the DOM through every state the lab can reach — every option of every control that changes
  * what renders — collect the `data-verdict` and `data-claim` markers that actually render, and
  * hold both sets against the recorded mutations in `verdict-mutations.ts`. A marker with no
- * mutation fails; a mutation for a marker that no longer renders fails; a record whose `killedBy`
- * test does not go through expectVerdict()/expectClaim() fails; and any verdict word, verdict
- * styling, or unmarked number painted in a result region fails.
+ * mutation fails; a mutation for a marker that no longer renders fails; a record whose killing
+ * assertion is handed an expectation read off that same marker fails; and any verdict word,
+ * verdict styling, or unmarked number painted in a result region fails.
+ *
+ * What is NOT here, deliberately: the rule that a record's killing assertion actually ran. That
+ * one cannot be answered by reading source, so it lives in e2e/coverage-replay.spec.ts, which runs
+ * as its own project after this one and reads what the helpers recorded. The source scan below
+ * survives as a cheap early catch — it names a mistyped id at the point it was typed — and it is
+ * explicitly no longer the thing the guarantee rests on: `includes("expectVerdict(page, 'chain'")`
+ * is true of a call inside a comment, of a call that never executes, and of a call in another
+ * test, and each of those was shown to ship a live verdict mutation green in this lab.
  */
 
 const SPEC_FILES = ['./verdicts.spec.ts', './claims.spec.ts']
@@ -30,22 +39,6 @@ const VERDICT_WORDS = '\\b(VALID|INVALID|ACCEPTED|REJECTED|REFUSED|FAILED|PASSED
  */
 const RESULT_REGIONS = ['.residual-panel', '.verifier-result', '.work-meters', '#chain-result', '#attack-result', '#chain-retirement']
 
-/** Splits the spec files into `test('<title>', …)` bodies, so a record's killedBy test can be read. */
-function testBodies(source: string): Map<string, string> {
-  const bodies = new Map<string, string>()
-  const heads = /\btest\('((?:[^'\\]|\\.)*)'/g
-  let match: RegExpExecArray | null
-  let title: string | null = null
-  let start = 0
-  while ((match = heads.exec(source)) !== null) {
-    if (title !== null) bodies.set(title, source.slice(start, match.index))
-    title = match[1]
-    start = match.index
-  }
-  if (title !== null) bodies.set(title, source.slice(start))
-  return bodies
-}
-
 const BODIES = testBodies(SPEC_SOURCE)
 
 /** Asserts one family of markers is completely and honestly covered by recorded mutations. */
@@ -58,7 +51,13 @@ function assertCoverage(rendered: Set<string>, records: Record<string, { killedB
     }
     const body = BODIES.get(record.killedBy)
     expect(body, `${id}.killedBy names "${record.killedBy}", which is not a test in ${SPEC_FILES.join(' or ')}`).toBeDefined()
-    expect(body?.includes(`${helper}(page, '${id}'`), `${id}'s kill is validated somewhere other than ${helper}(page, '${id}', …) inside "${record.killedBy}". A marker's text and its state are one claim, so a mutation that flips only the words must not count as a kill.`).toBe(true)
+    // Cheap and early, and no longer load-bearing: e2e/coverage-replay.spec.ts is what establishes
+    // that this call runs. Left in because it names a mistyped id here rather than at the end.
+    expect(body?.includes(`${helper}(page, '${id}'`), `${id}'s kill is not even written as ${helper}(page, '${id}', …) inside "${record.killedBy}". A marker's text and its state are one claim, so a mutation that flips only the words must not count as a kill.`).toBe(true)
+    // An assertion handed the marker's own rendered value passes on every page, mutated or not.
+    // It runs, so the replay sees it, and it names the right helper, so the line above sees it.
+    // Nothing but the provenance of the expectation separates it from a real check.
+    expect(oracleDependenceFailures(body ?? '', helper, id), `${id}'s expectation is not independent of the marker it judges`).toEqual([])
   }
 }
 

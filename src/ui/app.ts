@@ -12,17 +12,23 @@ import { residual, step, witnessVector, type RelaxedInstance } from '../r1cs/rel
  * Every rendered outcome carries data-verdict="<id>" and every one of them branches on a value
  * this file computed. e2e/verdict-mutations.ts records the mutation that kills each marker, and
  * e2e/verdicts.spec.ts fails if a marker renders with no mutation recorded, or if verdict words
- * or verdict styling ever render outside a marker.
+ * or verdict styling ever render outside a marker. Every rendered measurement carries
+ * data-claim="<id>" and is held to the same rule: a number painted outside a marker fails too.
+ *
+ * `result`, `tone` and the headline are three separate expressions of ONE decision, and they are
+ * asserted together by expectVerdict() in e2e/markers.ts. Flipping the words while leaving the
+ * state alone is therefore not a kill; it is a build failure.
  */
 function verdict(
   id: string,
+  result: 'pass' | 'fail' | 'caution',
   tone: 'good' | 'bad' | 'alarm' | 'warning',
   headline: string,
   detail: string,
   options: { claim?: string; extraClass?: string } = {},
 ): string {
   const classes = [options.extraClass, 'verdict', `verdict-${tone}`].filter(Boolean).join(' ')
-  return `<div class="${classes}" data-verdict="${id}" data-claim="${options.claim ?? id}"><span aria-hidden="true"></span><strong>${headline}</strong>${detail ? ` \u00b7 ${detail}` : ''}</div>`
+  return `<div class="${classes}" data-verdict="${id}" data-result="${result}" data-claim="${options.claim ?? id}"><span aria-hidden="true"></span><strong>${headline}</strong>${detail ? ` \u00b7 ${detail}` : ''}</div>`
 }
 
 function full(values: bigint[]): string {
@@ -193,6 +199,7 @@ function template(): string {
         <div class="residual-panel" data-stage-item="plain" hidden>
           ${verdict(
             'plain-fold',
+            plainSatisfied ? 'pass' : 'fail',
             plainSatisfied ? 'good' : 'bad',
             plainSatisfied ? 'SATISFIED' : 'NOT SATISFIED',
             plainSatisfied ? 'no cross term left over' : 'cross term remains',
@@ -204,6 +211,7 @@ function template(): string {
         <div class="residual-panel residual-pass" data-stage-item="relaxed" hidden>
           ${verdict(
             'relaxed-fold',
+            relaxedSatisfied ? 'pass' : 'fail',
             relaxedSatisfied ? 'good' : 'bad',
             relaxedSatisfied ? 'SATISFIED' : 'NOT SATISFIED',
             relaxedSatisfied ? 'E′ absorbed exactly r · T' : 'E′ did not absorb r · T',
@@ -275,11 +283,11 @@ function template(): string {
             <div class="work-meter">
               <span>FINAL OPEN</span>
               <div class="meter-track final"><i style="width:40%"></i></div>
-              <strong>1 W + 1 E</strong>
+              <strong data-claim="final-open-shape" data-value="${step(1n).W.length}W+${step(1n).E.length}E">${step(1n).W.length} W + ${step(1n).E.length} E</strong>
             </div>
           </div>
         </div>
-        <p id="chain-retirement" class="retirement" role="status" aria-live="polite">Choose a step count, then run the fold.</p>
+        <p id="chain-retirement" class="retirement" role="status" aria-live="polite" data-claim="chain-retirement">Choose a step count, then run the fold.</p>
         <div id="chain-result" class="chain-result" hidden></div>
       </section>
 
@@ -458,6 +466,7 @@ export function mountApp(root: HTMLElement | null): void {
       chainResult.hidden = true
       latestChain = null
       retirement.textContent = `Previous ${lastRunCount}-step verdict retired because the step count changed.`
+      retirement.dataset.value = String(lastRunCount)
     }
   })
 
@@ -478,6 +487,7 @@ export function mountApp(root: HTMLElement | null): void {
       chainResult.innerHTML = `
         ${verdict(
           'chain',
+          chain.opened.valid ? 'pass' : 'fail',
           chain.opened.valid ? 'good' : 'bad',
           `FOLDED ${count} → 1, ${chain.opened.valid ? 'VALID' : 'INVALID'}`,
           chain.opened.valid
@@ -489,6 +499,7 @@ export function mountApp(root: HTMLElement | null): void {
         )}
         ${verdict(
           'chain-cost',
+          chain.cost.constant ? 'pass' : 'caution',
           chain.cost.constant ? 'good' : 'warning',
           chain.cost.constant
             ? `PER-FOLD VERIFIER COST CONSTANT AT ${chain.cost.distinct[0]}`
@@ -496,7 +507,7 @@ export function mountApp(root: HTMLElement | null): void {
           `measured across ${chain.perFoldOps.length} folds \u00b7 <span data-claim="chain-total-ops" data-value="${chain.cost.total}">${chain.cost.total}</span> group operations in total, plus one final check`,
         )}
         <div class="chain-stats">
-          <div><span>STEPS ABSORBED</span><strong>${count}</strong></div>
+          <div><span>STEPS ABSORBED</span><strong data-claim="steps-absorbed" data-value="${count}">${count}</strong></div>
           <div><span>GROUP OPS / FOLD</span><strong data-claim="chain-ops" data-value="${chain.cost.distinct.join(',')}">${chain.cost.distinct.join(', ')}</strong></div>
           <div><span>FOLDED W LENGTH</span><strong data-claim="folded-w-length" data-value="${chain.folded.W.length}">${chain.folded.W.length}</strong></div>
           <div><span>ONE-STEP W LENGTH</span><strong data-claim="step-w-length" data-value="${step(1n).W.length}">${step(1n).W.length}</strong></div>
@@ -507,6 +518,7 @@ export function mountApp(root: HTMLElement | null): void {
         <div id="opening-result" hidden></div>
       `
       retirement.textContent = `${count} real steps folded. The final witness remains one step wide.`
+      retirement.dataset.value = String(count)
       runChain.disabled = false
       runChain.textContent = `Fold ${count} steps again`
 
@@ -522,10 +534,10 @@ export function mountApp(root: HTMLElement | null): void {
         const openLength = revealed.length
         const explained = latestChain.opened.witnessCommitmentValid && latestChain.opened.errorCommitmentValid
         const openingVerdict = !explained
-          ? verdict('final-opening', 'bad', 'OPENING REJECTED', 'the printed values do not reproduce the verifier’s commitments', { claim: 'negative-verdict' })
+          ? verdict('final-opening', 'fail', 'bad', 'OPENING REJECTED', 'the printed values do not reproduce the verifier’s commitments', { claim: 'negative-verdict' })
           : !latestChain.opened.valid
-            ? verdict('final-opening', 'bad', 'FINAL CHECK FAILED', 'the opened instance does not satisfy the relaxed constraints', { claim: 'negative-verdict' })
-            : verdict('final-opening', 'warning', 'VALID — AND NOTHING HIDDEN', 'the printed values alone reopen both commitments', { claim: 'negative-verdict' })
+            ? verdict('final-opening', 'fail', 'bad', 'FINAL CHECK FAILED', 'the opened instance does not satisfy the relaxed constraints', { claim: 'negative-verdict' })
+            : verdict('final-opening', 'caution', 'warning', 'VALID — AND NOTHING HIDDEN', 'the printed values alone reopen both commitments', { claim: 'negative-verdict' })
         opening.hidden = false
         opening.innerHTML = `
           <div class="opening-grid">
@@ -535,7 +547,7 @@ export function mountApp(root: HTMLElement | null): void {
           <div class="negative-fixture">
             ${openingVerdict}
             <p data-claim="negative-claim">The NIFS built here is neither zero-knowledge nor succinct on its own: the verifier’s accumulated commitments reopen from the ${openLength} values printed above, so nothing stays hidden, and the final step is that witness opening rather than a short proof.</p>
-            <p>Opened length: <strong data-claim="open-length" data-value="${openLength}">${openLength}</strong> = one-step W length <strong>${step(1n).W.length}</strong> + |E| <strong>${latestChain.folded.E.length}</strong>. Verifier work per fold is constant; this final open is one step wide however many steps were folded.</p>
+            <p>Opened length: <strong data-claim="open-length" data-value="${openLength}">${openLength}</strong> = one-step W length <strong data-claim="step-w-length" data-value="${step(1n).W.length}">${step(1n).W.length}</strong> + |E| <strong data-claim="folded-e-length" data-value="${latestChain.folded.E.length}">${latestChain.folded.E.length}</strong>. Verifier work per fold is constant; this final open is one step wide however many steps were folded.</p>
           </div>
         `
         ;(event.currentTarget as HTMLButtonElement).disabled = true
@@ -560,6 +572,7 @@ export function mountApp(root: HTMLElement | null): void {
         ].filter(Boolean)
         attackResult.innerHTML = `${verdict(
           'attack-witness',
+          check.valid ? 'fail' : 'pass',
           check.valid ? 'alarm' : 'good',
           check.valid ? 'TAMPER ACCEPTED' : 'FINAL CHECK FAILED',
           check.valid ? 'the altered witness opened against the original commitment' : `${broke.join(' and ')} disagree`,
@@ -569,6 +582,7 @@ export function mountApp(root: HTMLElement | null): void {
         const accepted = verifyChallenge(publicInstance(left), publicInstance(right), tamperCommitment(honest.proof.commitmentT), honest.proof.challenge)
         attackResult.innerHTML = `${verdict(
           'attack-commitment',
+          accepted ? 'fail' : 'pass',
           accepted ? 'alarm' : 'good',
           accepted ? 'TAMPERED Com(T) ACCEPTED' : 'TRANSCRIPT CHECK FAILED',
           accepted ? 'the transcript did not bind Com(T) to r' : 'Com(T) changed after r',
@@ -585,6 +599,7 @@ export function mountApp(root: HTMLElement | null): void {
         const forged = wasUnsatisfying && forgery.accepted
         attackResult.innerHTML = `${verdict(
           'attack-r-first',
+          forged ? 'fail' : 'pass',
           forged ? 'alarm' : 'good',
           forged ? 'ACCEPTED — AND FORGED' : 'FORGERY REFUSED',
           forged ? 'an unsatisfying step passed the final check' : wasUnsatisfying ? 'the forged opening did not pass the final check' : 'the hidden step was satisfying, so nothing was forged',

@@ -1,47 +1,63 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { expect, test, type Page } from '@playwright/test'
-import { commit } from '../src/commit/pedersen'
+import { expect, test } from '@playwright/test'
 import { proveFold, publicInstance, type PublicInstance } from '../src/nifs/prove'
 import { foldPublic } from '../src/nifs/verify'
 import { step } from '../src/r1cs/relaxed'
+import { oracleDependenceFailures, testBodies } from './coverage-rules'
 import { openLab } from './gate'
-import { VERDICT_MUTATIONS } from './verdict-mutations'
+import { driveEveryState, expectClaim, expectVerdict, foldChain, stepOf } from './markers'
+import { CLAIM_MUTATIONS, VERDICT_MUTATIONS } from './verdict-mutations'
 
 /**
- * Coverage is derived from the rendered page, never from a list anyone wrote by hand. These
- * tests walk the DOM through every state the lab can reach, collect the `data-verdict` markers
- * that actually render, and hold that set against the recorded mutations in
- * `verdict-mutations.ts`. A marker with no mutation fails; a mutation for a marker that no
- * longer renders fails; and any verdict word or verdict styling painted outside a marker fails,
- * which is what catches a raw banner added later by a careless hand.
+ * Coverage is derived from the rendered page, never from a list anyone wrote by hand. These tests
+ * walk the DOM through every state the lab can reach — every option of every control that changes
+ * what renders — collect the `data-verdict` and `data-claim` markers that actually render, and
+ * hold both sets against the recorded mutations in `verdict-mutations.ts`. A marker with no
+ * mutation fails; a mutation for a marker that no longer renders fails; a record whose killing
+ * assertion is handed an expectation read off that same marker fails; and any verdict word,
+ * verdict styling, or unmarked number painted in a result region fails.
+ *
+ * What is NOT here, deliberately: the rule that a record's killing assertion actually ran. That
+ * one cannot be answered by reading source, so it lives in e2e/coverage-replay.spec.ts, which runs
+ * as its own project after this one and reads what the helpers recorded. The source scan below
+ * survives as a cheap early catch — it names a mistyped id at the point it was typed — and it is
+ * explicitly no longer the thing the guarantee rests on: `includes("expectVerdict(page, 'chain'")`
+ * is true of a call inside a comment, of a call that never executes, and of a call in another
+ * test, and each of those was shown to ship a live verdict mutation green in this lab.
  */
 
-const SPEC_SOURCE = readFileSync(fileURLToPath(new URL('./verdicts.spec.ts', import.meta.url)), 'utf8')
+const SPEC_FILES = ['./verdicts.spec.ts', './claims.spec.ts']
+const SPEC_SOURCE = SPEC_FILES.map((name) => readFileSync(fileURLToPath(new URL(name, import.meta.url)), 'utf8')).join('\n')
 
 const VERDICT_WORDS = '\\b(VALID|INVALID|ACCEPTED|REJECTED|REFUSED|FAILED|PASSED|SATISFIED|UNSATISFIED|FORGED|SECURE|INSECURE|VERIFIED|TAMPERED|SUCCESS|FAILURE|SAFE|UNSAFE|MISMATCH)\\b'
 
-async function markersInDom(page: Page): Promise<string[]> {
-  return page.locator('[data-verdict]').evaluateAll((elements) => elements.map((element) => element.getAttribute('data-verdict') ?? ''))
-}
+/**
+ * Regions where the page reports an outcome. A rendered number here is a claim exactly as much as
+ * a rendered verdict word is, and is the easier thing to leave unmarked, because a number does not
+ * look like a claim.
+ */
+const RESULT_REGIONS = ['.residual-panel', '.verifier-result', '.work-meters', '#chain-result', '#attack-result', '#chain-retirement']
 
-/** Drives every state the lab can reach, calling back after each one so markers can be collected. */
-async function driveEveryState(page: Page, after: () => Promise<void>): Promise<void> {
-  await after()
-  for (const label of ['Show plain fold', 'Compute cross term T', 'Derive r and relax']) {
-    await page.getByRole('button', { name: label }).click()
-    await after()
-  }
-  await page.getByRole('button', { name: 'Fold 8 steps' }).click()
-  await expect(page.locator('[data-verdict="chain"]')).toBeVisible()
-  await after()
-  await page.getByRole('button', { name: 'Open final W′ and E′' }).click()
-  await expect(page.locator('[data-verdict="final-opening"]')).toBeVisible()
-  await after()
-  for (const label of ['Tamper W′', 'Tamper Com(T)', 'Reveal r before T']) {
-    await page.getByRole('button', { name: label }).click()
-    await expect(page.locator('#attack-result [data-verdict]')).toBeVisible()
-    await after()
+const BODIES = testBodies(SPEC_SOURCE)
+
+/** Asserts one family of markers is completely and honestly covered by recorded mutations. */
+function assertCoverage(rendered: Set<string>, records: Record<string, { killedBy: string }>, helper: string, family: string): void {
+  expect([...rendered].sort(), `${family} markers on the page without a recorded mutation, or mutations for ${family} markers that no longer render`).toEqual(Object.keys(records).sort())
+
+  for (const [id, record] of Object.entries(records)) {
+    for (const [field, value] of Object.entries(record)) {
+      expect(String(value).trim(), `${id}.${field} is empty: a mutation is only recorded once it has actually been run`).not.toBe('')
+    }
+    const body = BODIES.get(record.killedBy)
+    expect(body, `${id}.killedBy names "${record.killedBy}", which is not a test in ${SPEC_FILES.join(' or ')}`).toBeDefined()
+    // Cheap and early, and no longer load-bearing: e2e/coverage-replay.spec.ts is what establishes
+    // that this call runs. Left in because it names a mistyped id here rather than at the end.
+    expect(body?.includes(`${helper}(page, '${id}'`), `${id}'s kill is not even written as ${helper}(page, '${id}', …) inside "${record.killedBy}". A marker's text and its state are one claim, so a mutation that flips only the words must not count as a kill.`).toBe(true)
+    // An assertion handed the marker's own rendered value passes on every page, mutated or not.
+    // It runs, so the replay sees it, and it names the right helper, so the line above sees it.
+    // Nothing but the provenance of the expectation separates it from a real check.
+    expect(oracleDependenceFailures(body ?? '', helper, id), `${id}'s expectation is not independent of the marker it judges`).toEqual([])
   }
 }
 
@@ -75,119 +91,136 @@ function countRealFoldPublicOps(): number {
   return ops
 }
 
+/**
+ * The oracle for a chain of `stepCount` steps: one measured count PER FOLD, summed, with the fold
+ * count derived from the chain length under test. It has to be built this way round. Multiplying
+ * one measurement by a literal 7 cannot tell "summed seven measurements" apart from "multiplied
+ * one measurement out", which is exactly the distinction the sentence beside it claims.
+ */
+function measuredChainCost(stepCount: number): { perFold: number[]; distinct: number[]; total: number } {
+  const perFold = Array.from({ length: stepCount - 1 }, () => countRealFoldPublicOps())
+  return { perFold, distinct: [...new Set(perFold)].sort((left, right) => left - right), total: perFold.reduce((sum, ops) => sum + ops, 0) }
+}
+
 test.beforeEach(async ({ page }) => openLab(page))
 
 test('every rendered verdict marker has a recorded mutation that kills it', async ({ page }) => {
   const rendered = new Set<string>()
   await driveEveryState(page, async () => {
-    for (const id of await markersInDom(page)) rendered.add(id)
+    for (const id of await page.locator('[data-verdict]').evaluateAll((elements) => elements.map((element) => element.getAttribute('data-verdict') ?? ''))) rendered.add(id)
   })
-
-  const recorded = Object.keys(VERDICT_MUTATIONS).sort()
-  expect([...rendered].sort(), 'markers on the page without a recorded mutation, or mutations for markers that no longer render').toEqual(recorded)
-
-  for (const [id, record] of Object.entries(VERDICT_MUTATIONS)) {
-    for (const field of ['computes', 'file', 'mutation', 'baseline', 'failure', 'killedBy'] as const) {
-      expect(record[field].trim(), `${id}.${field} is empty: a mutation is only recorded once it has actually been run`).not.toBe('')
-    }
-    expect(SPEC_SOURCE.includes(`data-verdict="${id}"`), `${id} has a recorded mutation but nothing in verdicts.spec.ts asserts its rendered text`).toBe(true)
-    expect(SPEC_SOURCE.includes(record.killedBy), `${id}.killedBy names "${record.killedBy}", which is not a test in verdicts.spec.ts`).toBe(true)
-  }
+  assertCoverage(rendered, VERDICT_MUTATIONS, 'expectVerdict', 'verdict')
 })
 
-test('no verdict word or verdict styling renders outside a marker', async ({ page }) => {
+test('every rendered measurement marker has a recorded mutation that kills it', async ({ page }) => {
+  const rendered = new Set<string>()
+  await driveEveryState(page, async () => {
+    // Markers that sit ON a verdict element are that verdict under another name and are covered by
+    // its own record; everything else carrying data-claim is a measurement in its own right.
+    for (const id of await page.locator('[data-claim]:not([data-verdict])').evaluateAll((elements) => elements.map((element) => element.getAttribute('data-claim') ?? ''))) rendered.add(id)
+  })
+  assertCoverage(rendered, CLAIM_MUTATIONS, 'expectClaim', 'measurement')
+})
+
+test('no verdict word, verdict styling, or unmarked number renders outside a marker', async ({ page }) => {
   const offenders: string[] = []
   await driveEveryState(page, async () => {
-    const found = await page.evaluate((wordSource) => {
-      const words = new RegExp(wordSource)
+    const found = await page.evaluate((options) => {
+      const words = new RegExp(options.wordSource)
+      // A number followed by a word: "6 group ops", "1,632 B", "42 group operations", "8 real steps".
+      const numberWithUnit = /(?:^|[\s(])\d[\d,]*(?:\.\d+)?\s+[A-Za-z]/
+      const bareNumber = /^\d[\d,]*(?:\.\d+)?$/
       const bad: string[] = []
       for (const element of Array.from(document.querySelectorAll('*'))) {
-        if (element.closest('[data-verdict]')) continue
+        if (element.closest('[data-verdict],[data-claim]')) continue
         const styled = Array.from(element.classList).some((name) => name.includes('verdict'))
         const text = (element.textContent ?? '').trim()
-        const shouted = element.children.length === 0
-          && text.length > 0
-          && text === text.toUpperCase()
-          && /[A-Z]/.test(text)
-          && words.test(text)
-        if (styled || shouted) bad.push(`<${element.tagName.toLowerCase()} class="${element.className}"> ${text.slice(0, 80)}`)
+        const leaf = element.children.length === 0 && text.length > 0
+        const shouted = leaf && text === text.toUpperCase() && /[A-Z]/.test(text) && words.test(text)
+        const inResult = options.regions.some((selector) => element.closest(selector) !== null)
+        const measured = leaf && inResult && (numberWithUnit.test(text) || bareNumber.test(text))
+        if (styled || shouted || measured) bad.push(`<${element.tagName.toLowerCase()} class="${element.className}"> ${text.slice(0, 80)}`)
       }
       return bad
-    }, VERDICT_WORDS)
+    }, { wordSource: VERDICT_WORDS, regions: RESULT_REGIONS })
     offenders.push(...found)
   })
-  expect([...new Set(offenders)], 'verdict styling or an uppercase verdict word rendered outside any data-verdict marker').toEqual([])
+  expect([...new Set(offenders)], 'verdict styling, an uppercase verdict word, or a rendered number in a result region, outside any marker').toEqual([])
 })
 
 test('the walkthrough verdicts follow the residuals they print', async ({ page }) => {
   await page.getByRole('button', { name: 'Show plain fold' }).click()
-  const plain = page.locator('[data-verdict="plain-fold"]')
-  await expect(plain).toContainText('NOT SATISFIED')
-  await expect(plain).toHaveClass(/verdict-bad/)
+  await expectVerdict(page, 'plain-fold', { text: ['NOT SATISFIED', 'cross term remains'], result: 'fail', tone: 'bad' })
   const plainResidual = await page.locator('[data-claim="plain-residual"]').getAttribute('data-value')
   expect(plainResidual, 'plain-fold says NOT SATISFIED, so its residual must be nonzero').not.toBe('[0, 0]')
 
   await page.getByRole('button', { name: 'Compute cross term T' }).click()
   await page.getByRole('button', { name: 'Derive r and relax' }).click()
-  const relaxed = page.locator('[data-verdict="relaxed-fold"]')
-  await expect(relaxed).toContainText('SATISFIED')
-  await expect(relaxed).toHaveClass(/verdict-good/)
+  await expectVerdict(page, 'relaxed-fold', { text: ['SATISFIED', 'E′ absorbed exactly r · T'], result: 'pass', tone: 'good' })
   expect(await page.locator('[data-claim="relaxed-residual"]').getAttribute('data-value'), 'relaxed-fold says SATISFIED, so its residual must be zero').toBe('[0, 0]')
 })
 
 test('the chain verdict follows the final check', async ({ page }) => {
-  await page.getByRole('button', { name: 'Fold 8 steps' }).click()
-  const chain = page.locator('[data-verdict="chain"]')
-  await expect(chain).toContainText('FOLDED 8 → 1, VALID')
-  await expect(chain).toHaveClass(/verdict-good/)
-  await expect(chain).toContainText('constraints and both accumulated commitments agree')
+  for (const count of [8, 64]) {
+    await foldChain(page, count)
+    await expectVerdict(page, 'chain', {
+      text: [`FOLDED ${count} → 1, VALID`, 'constraints and both accumulated commitments agree'],
+      result: 'pass',
+      tone: 'good',
+    })
+  }
 })
 
 test('the chain cost verdict reports a measurement, not a constant', async ({ page }) => {
-  await page.getByRole('button', { name: 'Fold 8 steps' }).click()
-  const cost = page.locator('[data-verdict="chain-cost"]')
-  await expect(cost).toContainText('PER-FOLD VERIFIER COST CONSTANT AT')
-  await expect(cost).toContainText('measured across 7 folds')
-
   // The page must report what the verifier's own code path actually costs. Counted here with a
   // stand-in written for this test alone, so the number on the page is never compared to the
-  // module that produced it.
-  const counted = countRealFoldPublicOps()
-  expect(await page.locator('[data-claim="chain-ops"]').getAttribute('data-value')).toBe(String(counted))
-  expect(await page.locator('[data-claim="ops-per-fold"]').getAttribute('data-value')).toBe(String(counted))
-  expect(await page.locator('[data-claim="chain-total-ops"]').getAttribute('data-value'), 'seven folds of measured cost, summed').toBe(String(counted * 7))
+  // module that produced it. Run at the default and at 64 because the fold count comes from
+  // perFoldOps.length: at one step count a literal 7 would be indistinguishable from a measurement.
+  for (const count of [8, 64]) {
+    const measured = measuredChainCost(count)
+    await foldChain(page, count)
+    await expectVerdict(page, 'chain-cost', {
+      text: [`PER-FOLD VERIFIER COST CONSTANT AT ${measured.distinct[0]}`, `measured across ${measured.perFold.length} folds`],
+      result: 'pass',
+      tone: 'good',
+    })
+    await expectClaim(page, 'chain-ops', { value: measured.distinct.join(','), note: 'the distinct per-fold costs this suite measured for itself' })
+    await expectClaim(page, 'chain-total-ops', { value: String(measured.total), note: `${measured.perFold.length} measured per-fold costs, summed — never one count multiplied out` })
+    await expectClaim(page, 'ops-per-fold', { value: String(measured.distinct[0]), note: 'the verifier lane reports one measured fold' })
+    await expectClaim(page, 'meter-ops-per-fold', { value: String(measured.distinct[0]), note: 'the PER FOLD meter reports the same measured fold' })
+    await expectClaim(page, 'steps-absorbed', { value: String(count), note: 'the stats grid reports the chain length that was run' })
+    await expectClaim(page, 'chain-retirement', { value: String(count), note: 'the status line reports the chain length that was run' })
+    await expectClaim(page, 'folded-w-length', { value: String(stepOf(1n).W.length), note: 'however many steps fold, the final witness stays one step wide' })
+    await expectClaim(page, 'step-w-length', { value: String(stepOf(1n).W.length), note: 'one step of this R1CS has exactly one private coordinate, x²' })
+  }
 })
 
 test('the final opening verdict follows the commitment check', async ({ page }) => {
-  await page.getByRole('button', { name: 'Fold 8 steps' }).click()
+  await foldChain(page, 8)
   await page.getByRole('button', { name: 'Open final W′ and E′' }).click()
-  const opening = page.locator('[data-verdict="final-opening"]')
-  await expect(opening).toContainText('VALID — AND NOTHING HIDDEN')
-  await expect(opening).toContainText('the printed values alone reopen both commitments')
-
-  // "Nothing hidden" is a measurable claim: re-commit the values the page printed and check they
-  // reproduce the commitment the verifier accumulated. A blinded commitment would not.
-  const parse = (value: string): bigint[] => value.replace(/[\[\]]/g, '').split(',').filter(Boolean).map((entry) => BigInt(entry.trim()))
-  const openedE = parse((await page.locator('[data-claim="opened-E"]').getAttribute('data-value'))!)
-  expect(commit(openedE).toHex()).toBe(await page.locator('[data-claim="final-commitment-e"]').getAttribute('data-value'))
+  await expectVerdict(page, 'final-opening', {
+    text: ['VALID — AND NOTHING HIDDEN', 'the printed values alone reopen both commitments'],
+    result: 'caution',
+    tone: 'warning',
+  })
 })
 
 test('each attack verdict follows its own verifier result', async ({ page }) => {
   await page.getByRole('button', { name: 'Tamper W′' }).click()
-  const witness = page.locator('[data-verdict="attack-witness"]')
-  await expect(witness).toContainText('FINAL CHECK FAILED')
-  await expect(witness).toContainText('the relaxed constraints and the witness commitment disagree')
+  await expectVerdict(page, 'attack-witness', {
+    text: ['FINAL CHECK FAILED', 'the relaxed constraints and the witness commitment disagree'],
+    result: 'pass',
+    tone: 'good',
+  })
   await expect(page.locator('#attack-result')).toContainText('Verifier returned false')
 
   await page.getByRole('button', { name: 'Tamper Com(T)' }).click()
-  const commitment = page.locator('[data-verdict="attack-commitment"]')
-  await expect(commitment).toContainText('TRANSCRIPT CHECK FAILED')
-  await expect(commitment).toContainText('Com(T) changed after r')
+  await expectVerdict(page, 'attack-commitment', { text: ['TRANSCRIPT CHECK FAILED', 'Com(T) changed after r'], result: 'pass', tone: 'good' })
 
   await page.getByRole('button', { name: 'Reveal r before T' }).click()
-  const rFirst = page.locator('[data-verdict="attack-r-first"]')
-  await expect(rFirst).toContainText('ACCEPTED — AND FORGED')
-  await expect(rFirst).toContainText('an unsatisfying step passed the final check')
-  const hidden = await page.locator('[data-claim="hidden-residual"]').getAttribute('data-value')
-  expect(hidden, 'the forged step must genuinely be unsatisfying, or there is nothing to forge').not.toBe('[0, 0]')
+  await expectVerdict(page, 'attack-r-first', {
+    text: ['ACCEPTED — AND FORGED', 'an unsatisfying step passed the final check'],
+    result: 'fail',
+    tone: 'alarm',
+  })
 })

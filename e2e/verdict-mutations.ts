@@ -77,12 +77,24 @@ export interface VerdictMutation {
   failure: string
   /** Test title, in verdicts.spec.ts or claims.spec.ts, that owns this marker. */
   killedBy: string
+  /**
+   * The same edit as `mutation` above, as something a script can apply: the file, an
+   * anchor that must occur exactly once, and its replacement. The prose stays because it
+   * carries what a patch cannot -- which function the edit sits in, and why the edit was
+   * chosen -- and scripts/mutation.mjs refuses to run a record that has only the prose.
+   */
+  patch: { file: string; find: string; replace: string }
 }
 
 export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'plain-fold': {
     computes: 'residual() of the folded instance with E zeroed out, i.e. the plain random combination',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "const plain = { ...result.folded, E: [0n, 0n] }",
+      replace: "const plain = { ...result.folded }",
+    },
     mutation: "template(): `const plain = { ...result.folded, E: [0n, 0n] }` -> `const plain = { ...result.folded }`, so the plain fold keeps E' and becomes satisfying",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -93,6 +105,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'relaxed-fold': {
     computes: "residual() of the relaxed folded instance, which is zero only if E' absorbed r*T",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "const relaxedResidual = residual(result.folded)",
+      replace: "const relaxedResidual = residual(plain)",
+    },
     mutation: 'template(): `const relaxedResidual = residual(result.folded)` -> `residual(plain)`, pointing the verdict at the unrelaxed combination',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -103,6 +120,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   chain: {
     computes: 'finalCheck of the opened witness against the commitments the verifier accumulated with foldPublic',
     file: 'src/open/final-check.ts',
+    patch: {
+      file: "src/open/final-check.ts",
+      find: "valid: constraintValid &&",
+      replace: "valid: false && constraintValid &&",
+    },
     mutation: 'finalCheck(): `valid: constraintValid && ...` -> `valid: false && constraintValid && ...`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -113,6 +135,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'chain-cost': {
     computes: 'the per-fold group-operation counts measured by running the real foldPublic over instrumented points',
     file: 'src/nifs/cost.ts',
+    patch: {
+      file: "src/nifs/cost.ts",
+      find: "  multiply(scalar: bigint): CountingPoint {\n    this.tally.ops += 1",
+      replace: "  multiply(scalar: bigint): CountingPoint {\n    this.tally.ops += 0",
+    },
     mutation: 'CountingPoint.multiply(): `this.tally.ops += 1` -> `this.tally.ops += 0`, so scalar multiplications stop being counted',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -123,6 +150,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'final-opening': {
     computes: "whether the printed W' and E' reopen the verifier's accumulated commitments, and whether the opened instance satisfies the constraints",
     file: 'src/nifs/verify.ts',
+    patch: {
+      file: "src/nifs/verify.ts",
+      find: "commitmentW: left.commitmentW.add(right.commitmentW.multiply(r)),",
+      replace: "commitmentW: left.commitmentW.add(right.commitmentW.multiply(mod(r + 1n))),",
+    },
     mutation: 'foldPublic(): `commitmentW: left.commitmentW.add(right.commitmentW.multiply(r))` -> `.multiply(mod(r + 1n))`, breaking the witness-commitment homomorphism only',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -133,6 +165,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'attack-witness': {
     computes: 'finalCheck of a witness altered after the fold, against the original commitments',
     file: 'src/open/final-check.ts',
+    patch: {
+      file: "src/open/final-check.ts",
+      find: "valid: constraintValid && witnessCommitmentValid && errorCommitmentValid && opened.u === publicFolded.u && opened.x.every((value, index) => value === publicFolded.x[index]),",
+      replace: "valid: true,",
+    },
     mutation: 'finalCheck(): `valid: constraintValid && ...` -> `valid: true`, so the altered witness opens successfully',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -143,6 +180,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'attack-commitment': {
     computes: 'verifyChallenge() after Com(T) is substituted post-transcript',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "tamperCommitment(honest.proof.commitmentT)",
+      replace: "honest.proof.commitmentT",
+    },
     mutation: 'attack handler: `tamperCommitment(honest.proof.commitmentT)` -> `honest.proof.commitmentT`, so nothing is actually tampered',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -153,6 +195,11 @@ export const VERDICT_MUTATIONS: Record<string, VerdictMutation> = {
   'attack-r-first': {
     computes: 'whether the hidden step really was unsatisfying AND the forged opening really passed finalCheck',
     file: 'src/attack/r-first.ts',
+    patch: {
+      file: "src/attack/r-first.ts",
+      find: "const folded = { ...shell, E: targetE }",
+      replace: "const folded = { ...shell }",
+    },
     mutation: 'forgeAfterChallenge(): `const folded = { ...shell, E: targetE }` -> `const folded = { ...shell }`, so the forged error vector is not installed and the forgery fails',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (26.8s)'.",
@@ -166,6 +213,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   A: {
     computes: 'the R1CS A matrix: row one and row two both take x on the left of their product',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"A\" data-value='${JSON.stringify(A, ",
+      replace: "data-claim=\"A\" data-value='${JSON.stringify(B, ",
+    },
     mutation: "template(): the A disclosure renders `JSON.stringify(A, …)` -> `JSON.stringify(B, …)` in its data-value",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -176,6 +228,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   B: {
     computes: 'the R1CS B matrix: row one squares x, row two multiplies by the private witness',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"B\" data-value='${JSON.stringify(B, ",
+      replace: "data-claim=\"B\" data-value='${JSON.stringify(C, ",
+    },
     mutation: "template(): the B disclosure renders `JSON.stringify(B, …)` -> `JSON.stringify(C, …)` in its data-value",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -186,6 +243,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   C: {
     computes: 'the R1CS C matrix: row one outputs x², row two outputs y − 3u',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"C\" data-value='${JSON.stringify(C, ",
+      replace: "data-claim=\"C\" data-value='${JSON.stringify(A, ",
+    },
     mutation: "template(): the C disclosure renders `JSON.stringify(C, …)` -> `JSON.stringify(A, …)` in its data-value",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -196,6 +258,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   x1: {
     computes: 'the public inputs of instance 1, the step x = 2',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('x₁', left.x, 'x1')",
+      replace: "valueRow('x₁', right.x, 'x1')",
+    },
     mutation: "template(): `valueRow('x₁', left.x, 'x1')` -> `valueRow('x₁', right.x, 'x1')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -206,6 +273,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   W1: {
     computes: 'the private witness of instance 1, x² = 4',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('W₁', left.W, 'W1')",
+      replace: "valueRow('W₁', right.W, 'W1')",
+    },
     mutation: "template(): `valueRow('W₁', left.W, 'W1')` -> `valueRow('W₁', right.W, 'W1')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -216,6 +288,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   x2: {
     computes: 'the public inputs of instance 2, the step x = 5',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('x₂', right.x, 'x2')",
+      replace: "valueRow('x₂', left.x, 'x2')",
+    },
     mutation: "template(): `valueRow('x₂', right.x, 'x2')` -> `valueRow('x₂', left.x, 'x2')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -226,6 +303,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   W2: {
     computes: 'the private witness of instance 2, x² = 25',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('W₂', right.W, 'W2')",
+      replace: "valueRow('W₂', left.W, 'W2')",
+    },
     mutation: "template(): `valueRow('W₂', right.W, 'W2')` -> `valueRow('W₂', left.W, 'W2')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -236,6 +318,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'final-open-shape': {
     computes: 'the size of the one opening the whole chain ends in: one W coordinate and one E per constraint row',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "+${step(1n).E.length}E\"",
+      replace: "+${step(1n).W.length}E\"",
+    },
     mutation: 'template(): the FINAL OPEN meter renders `${step(1n).E.length}E` -> `${step(1n).W.length}E`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.5s)'.",
@@ -246,6 +333,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   T: {
     computes: 'the Nova cross term A z₁ ∘ B z₂ + A z₂ ∘ B z₁ − u₁ C z₂ − u₂ C z₁',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('T', result.proof.T, 'T')",
+      replace: "valueRow('T', expectedResidual, 'T')",
+    },
     mutation: "template(): `valueRow('T', result.proof.T, 'T')` -> `valueRow('T', expectedResidual, 'T')`, so the correction renders as r · T instead of T",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -256,6 +348,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   r: {
     computes: 'the SHA-512 Fiat-Shamir challenge the transcript derived',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"r\" data-value=\"${result.proof.challenge}\"",
+      replace: "data-claim=\"r\" data-value=\"${mod(result.proof.challenge + 1n)}\"",
+    },
     mutation: 'template(): the challenge stamp renders `data-value="${result.proof.challenge}"` -> `data-value="${mod(result.proof.challenge + 1n)}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -266,6 +363,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'plain-residual': {
     computes: 'what the plain random combination leaves behind, which must be exactly r · T',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"plain-residual\" data-value=\"${full(plainResidual)}\"",
+      replace: "data-claim=\"plain-residual\" data-value=\"${full(relaxedResidual)}\"",
+    },
     mutation: 'template(): the plain-residual code renders `data-value="${full(plainResidual)}"` -> `data-value="${full(relaxedResidual)}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -276,6 +378,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'expected-residual': {
     computes: 'r · T, the value the equation line claims the plain residual equals',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "const expectedResidual = scale(result.proof.T, result.proof.challenge)",
+      replace: "const expectedResidual = scale(result.proof.T, mod(result.proof.challenge + 1n))",
+    },
     mutation: 'template(): `const expectedResidual = scale(result.proof.T, result.proof.challenge)` -> `scale(result.proof.T, mod(result.proof.challenge + 1n))`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -286,6 +393,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   ufold: {
     computes: "the folded relaxation scalar u′ = u₁ + r·u₂",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('u′', result.folded.u, 'ufold')",
+      replace: "valueRow('u′', left.u, 'ufold')",
+    },
     mutation: "template(): `valueRow('u′', result.folded.u, 'ufold')` -> `valueRow('u′', left.u, 'ufold')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -296,6 +408,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   xfold: {
     computes: "the folded public inputs x′ = x₁ + r·x₂",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('x′', result.folded.x, 'xfold')",
+      replace: "valueRow('x′', left.x, 'xfold')",
+    },
     mutation: "template(): `valueRow('x′', result.folded.x, 'xfold')` -> `valueRow('x′', left.x, 'xfold')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -306,6 +423,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   Wfold: {
     computes: "the folded witness W′ = W₁ + r·W₂",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('W′', result.folded.W, 'Wfold')",
+      replace: "valueRow('W′', left.W, 'Wfold')",
+    },
     mutation: "template(): `valueRow('W′', result.folded.W, 'Wfold')` -> `valueRow('W′', left.W, 'Wfold')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -316,6 +438,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   Efold: {
     computes: "the folded error vector E′ = E₁ + r·T + r²·E₂, which is r·T when both inputs are ordinary",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('E′', result.folded.E, 'Efold')",
+      replace: "valueRow('E′', left.E, 'Efold')",
+    },
     mutation: "template(): `valueRow('E′', result.folded.E, 'Efold')` -> `valueRow('E′', left.E, 'Efold')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.2s)'.",
@@ -326,6 +453,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'relaxed-residual': {
     computes: 'the residual of the relaxed folded instance, which is zero exactly when E′ absorbed r · T',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"relaxed-residual\" data-value=\"${full(relaxedResidual)}\"",
+      replace: "data-claim=\"relaxed-residual\" data-value=\"${full(plainResidual)}\"",
+    },
     mutation: 'template(): the relaxed-residual code renders `data-value="${full(relaxedResidual)}"` -> `data-value="${full(plainResidual)}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -336,6 +468,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'pair-commitment-e': {
     computes: "Com(E′) as the verifier accumulated it homomorphically, without ever seeing E′",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"pair-commitment-e\" data-value=\"${commitmentHex(result.publicFolded.commitmentE)",
+      replace: "data-claim=\"pair-commitment-e\" data-value=\"${commitmentHex(result.publicFolded.commitmentW)",
+    },
     mutation: 'template(): the verifier lane renders `commitmentHex(result.publicFolded.commitmentE)` -> `commitmentHex(result.publicFolded.commitmentW)` in its data-value',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -346,6 +483,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'ops-per-fold': {
     computes: 'the group operations one real foldPublic costs, measured over instrumented points',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"ops-per-fold\" data-value=\"${pairOps}\"",
+      replace: "data-claim=\"ops-per-fold\" data-value=\"${pairOps + 1}\"",
+    },
     mutation: 'template(): the verifier-lane meter renders `data-value="${pairOps}"` -> `data-value="${pairOps + 1}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -356,6 +498,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'meter-ops-per-fold': {
     computes: 'the same measured per-fold cost, as the PER FOLD work meter states it',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"meter-ops-per-fold\" data-value=\"${pairOps}\"",
+      replace: "data-claim=\"meter-ops-per-fold\" data-value=\"${pairOps + 1}\"",
+    },
     mutation: 'template(): the PER FOLD meter renders `data-value="${pairOps}"` -> `data-value="${pairOps + 1}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -366,6 +513,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'chain-ops': {
     computes: 'the distinct per-fold costs measured across the whole chain',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"chain-ops\" data-value=\"${chain.cost.distinct.join(',')}\"",
+      replace: "data-claim=\"chain-ops\" data-value=\"${chain.cost.total}\"",
+    },
     mutation: 'run handler: the GROUP OPS / FOLD stat renders `data-value="${chain.cost.distinct.join(\',\')}"` -> `data-value="${chain.cost.total}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -376,6 +528,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'chain-total-ops': {
     computes: 'the sum of every per-fold measurement in the chain, not one count multiplied out',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "perFoldOps.push(verifierGroupOps(publicFolded, publicStep, result.proof.commitmentT, result.proof.challenge))",
+      replace: "perFoldOps.push(verifierGroupOps(publicFolded, publicStep, result.proof.commitmentT, result.proof.challenge) - (index === 2 ? 1 : 0))",
+    },
     mutation: 'foldChain(): `perFoldOps.push(verifierGroupOps(…))` -> `perFoldOps.push(verifierGroupOps(…) - (index === 2 ? 1 : 0))`, so the FIRST FOLD ALONE tallies one less. It is the only mutation in either set that can tell a summed total from a multiplied one; every other one moves all folds at once.',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -386,6 +543,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'steps-absorbed': {
     computes: 'the chain length that was actually folded',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"steps-absorbed\" data-value=\"${count}\"",
+      replace: "data-claim=\"steps-absorbed\" data-value=\"${count - 1}\"",
+    },
     mutation: 'run handler: the STEPS ABSORBED stat renders `data-value="${count}"` -> `data-value="${count - 1}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -396,6 +558,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'chain-retirement': {
     computes: 'the chain length the live status line announces after a run',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "retirement.dataset.value = String(count)",
+      replace: "retirement.dataset.value = String(count + 1)",
+    },
     mutation: 'run handler: `retirement.dataset.value = String(count)` -> `String(count + 1)`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (7.0s)'.",
@@ -406,6 +573,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'folded-w-length': {
     computes: 'the width of the witness after folding, which stays one step wide however long the chain',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"folded-w-length\" data-value=\"${chain.folded.W.length}\"",
+      replace: "data-claim=\"folded-w-length\" data-value=\"${count}\"",
+    },
     mutation: 'run handler: the FOLDED W LENGTH stat renders `data-value="${chain.folded.W.length}"` -> `data-value="${count}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -416,6 +588,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'step-w-length': {
     computes: 'the width of one unfolded step, the yardstick the folded width is read against',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "ONE-STEP W LENGTH</span><strong data-claim=\"step-w-length\" data-value=\"${step(1n).W.length}\"",
+      replace: "ONE-STEP W LENGTH</span><strong data-claim=\"step-w-length\" data-value=\"${step(1n).x.length}\"",
+    },
     mutation: 'run handler: the ONE-STEP W LENGTH stat renders `data-value="${step(1n).W.length}"` -> `data-value="${step(1n).x.length}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -426,6 +603,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'opened-W': {
     computes: "the private witness the final opening prints, W′ = W₁ + r·W₂",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('Private W′', latestChain.folded.W, 'opened-W')",
+      replace: "valueRow('Private W′', latestChain.folded.E, 'opened-W')",
+    },
     mutation: "open handler: `valueRow('Private W′', latestChain.folded.W, 'opened-W')` -> `valueRow('Private W′', latestChain.folded.E, 'opened-W')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -436,6 +618,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'opened-E': {
     computes: "the error vector the final opening prints, which must reopen the accumulated Com(E′)",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "valueRow('Error E′', latestChain.folded.E, 'opened-E')",
+      replace: "valueRow('Error E′', latestChain.folded.W, 'opened-E')",
+    },
     mutation: "open handler: `valueRow('Error E′', latestChain.folded.E, 'opened-E')` -> `valueRow('Error E′', latestChain.folded.W, 'opened-E')`",
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -446,6 +633,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'final-commitment-e': {
     computes: "Com(E′) accumulated across the whole chain, which the printed E′ alone has to reopen",
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "finalCommitmentE: commitmentHex(publicFolded.commitmentE),",
+      replace: "finalCommitmentE: commitmentHex(publicFolded.commitmentW),",
+    },
     mutation: 'foldChain(): `finalCommitmentE: commitmentHex(publicFolded.commitmentE)` -> `commitmentHex(publicFolded.commitmentW)`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -456,6 +648,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'open-length': {
     computes: 'how many field elements the final opening reveals in total',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"open-length\" data-value=\"${openLength}\"",
+      replace: "data-claim=\"open-length\" data-value=\"${latestChain.folded.W.length}\"",
+    },
     mutation: 'open handler: `data-claim="open-length" data-value="${openLength}"` -> `data-value="${latestChain.folded.W.length}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -466,6 +663,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'folded-e-length': {
     computes: 'how many error coordinates the opening reveals, one per constraint row',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "data-claim=\"folded-e-length\" data-value=\"${latestChain.folded.E.length}\"",
+      replace: "data-claim=\"folded-e-length\" data-value=\"${latestChain.folded.W.length}\"",
+    },
     mutation: 'open handler: `data-claim="folded-e-length" data-value="${latestChain.folded.E.length}"` -> `data-value="${latestChain.folded.W.length}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -476,6 +678,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'negative-claim': {
     computes: 'the negative claim, which names the opening it is drawn from',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "reopen from the ${openLength} values printed above",
+      replace: "reopen from the ${openLength + 1} values printed above",
+    },
     mutation: 'open handler: `reopen from the ${openLength} values printed above` -> `${openLength + 1}`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.5s)'.",
@@ -486,6 +693,11 @@ export const CLAIM_MUTATIONS: Record<string, VerdictMutation> = {
   'hidden-residual': {
     computes: 'the residual of the step the broken mode hides, which must be nonzero or there is nothing to forge',
     file: 'src/ui/app.ts',
+    patch: {
+      file: "src/ui/app.ts",
+      find: "<span data-claim=\"hidden-residual\" data-value=\"${full(before)}\">",
+      replace: "<span data-claim=\"hidden-residual\" data-value=\"${full(forgery.forgedT)}\">",
+    },
     mutation: 'attack handler: `<span data-claim="hidden-residual" data-value="${full(before)}">` -> `data-value="${full(forgery.forgedT)}"`',
     baseline:
       "Unmutated run in the same session, bracketing this mutation: '14 passed (6.9s)'.",

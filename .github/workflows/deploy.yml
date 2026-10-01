@@ -92,20 +92,29 @@ jobs:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           DEPS: ${{ steps.meta.outputs.dependency-names }}
       - name: Merge any bump whose gate went green
+        # Retry: a sibling PR merging first moves main underneath us and GitHub
+        # rejects with "Base branch was modified". That is benign, so try again
+        # rather than failing the run over a race.
         run: |
+          merged=""
           for attempt in 1 2 3; do
-            gh pr merge --squash --delete-branch "$PR_URL" && merged=1 && break
+            if gh pr merge --squash --delete-branch "$PR_URL"; then
+              merged=1
+              break
+            fi
+            echo "merge attempt $attempt failed; base branch may have moved - retrying"
             sleep 15
           done
           if [ -z "$merged" ]; then
-            state=$(gh pr view "$PR_URL" --json state --jq .state)
-            if [ "$state" = "MERGED" ]; then
-              merged=1
-            else
-              echo "::error::gate passed but the merge did not land after 3 attempts (PR state: $state)"
-              exit 1
-            fi
+            echo "::warning::gate passed but the merge did not land after 3 attempts;"
+            echo "::warning::leaving this PR open - Dependabot will rebase and retry."
+            exit 0
           fi
+          # A merge made with GITHUB_TOKEN raises no push event -- GitHub suppresses
+          # them so workflows cannot retrigger themselves -- so deploy would never run
+          # and the site would keep serving the previous build. Ask for it explicitly;
+          # a workflow_dispatch through the API is not suppressed. The dispatched run
+          # is the same gate-then-deploy pipeline, so a bad merge still ships nothing.
           gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

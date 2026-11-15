@@ -398,7 +398,7 @@ function template(): string {
           <a href="https://eprint.iacr.org/2021/370">Kothapalli, Setty, Tzialla · Nova · CRYPTO 2022</a>
           <a href="https://www.rfc-editor.org/rfc/rfc9380">RFC 9380 · Hashing to Elliptic Curves</a>
           <a href="https://doi.org/10.1007/3-540-46766-1_9">Pedersen · Verifiable Secret Sharing · CRYPTO 1991</a>
-          <a href="https://doi.org/10.1007/978-3-540-92600-6_1">Valiant · Incrementally Verifiable Computation · TCC 2008</a>
+          <a href="https://doi.org/10.1007/978-3-540-78524-8_1">Valiant · Incrementally Verifiable Computation · TCC 2008</a>
         </div>
       </section>
     </div>

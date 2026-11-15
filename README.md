@@ -138,9 +138,11 @@ Per-fold cost is what stays constant. Total verifier work is not: this lab build
 ## References
 
 - Kothapalli, Setty, and Tzialla, [Nova: Recursive Zero-Knowledge Arguments from Folding Schemes](https://eprint.iacr.org/2021/370), CRYPTO 2022.
-- Valiant, [Incrementally Verifiable Computation or Proofs of Knowledge Imply Time/Space Efficiency](https://doi.org/10.1007/978-3-540-92600-6_1), TCC 2008.
+- Valiant, [Incrementally Verifiable Computation or Proofs of Knowledge Imply Time/Space Efficiency](https://doi.org/10.1007/978-3-540-78524-8_1), TCC 2008.
 - Pedersen, [Non-Interactive and Information-Theoretic Secure Verifiable Secret Sharing](https://doi.org/10.1007/3-540-46766-1_9), CRYPTO 1991.
 - [RFC 9380: Hashing to Elliptic Curves](https://www.rfc-editor.org/rfc/rfc9380).
+
+**Sources reviewed 15 November 2026:** every link above was resolved and its title and authors checked against the publisher's record. The Valiant DOI was corrected: `10.1007/978-3-540-92600-6_1` is not a registered DOI and returns 404 at doi.org. The paper is `10.1007/978-3-540-78524-8_1`, TCC 2008, pp. 1–18. The citation text was already right.
 
 ---
 

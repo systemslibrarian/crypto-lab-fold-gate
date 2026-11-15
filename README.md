@@ -70,7 +70,8 @@ npm run preview
 npm test               # 18 unit/property tests
 npm run test:coverage  # V8 statement/branch/function/line coverage
 npm run build          # strict TypeScript + Vite production build
-npm run test:a11y      # 17 production-browser verdict, claims, and accessibility tests
+npm run test:a11y      # 19 Playwright tests: 17 production-browser verdict, claims and
+                       # accessibility tests, then 2 coverage-replay checks
 ```
 
 The 18 unit tests cover exact cross-term absorption, 64 deterministic field samples, repeated folds, malformed vectors, commitment homomorphism, generator derivation, transcript binding, verifier isolation, final opening, tampering, the challenge-first forgery, and the verifier cost instrumentation. Coverage is gated at 95% statements/lines, 85% branches, and 85% functions across the cryptographic modules. The 19 Playwright tests independently recompute displayed R1CS claims with `BigInt`, compare the rendered folded error commitment against a re-commitment of the opened values, count the real `foldPublic` group operations with a stand-in written for the test alone, exercise verdict retirement and its no-op guard, check real UI states with axe, compute text and control contrast, and check mobile overflow.

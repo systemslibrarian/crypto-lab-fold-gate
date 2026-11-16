@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { auditControlNames, formatControlNameFailures } from './control-names'
 import { auditTextContrast } from './contrast'
 import { axeFindings, openLab } from './gate'
 import { NON_TEXT_BASELINE } from './nontext-baseline'
@@ -8,6 +9,9 @@ test.beforeEach(async ({ page }) => openLab(page))
 
 test('has no WCAG A/AA or landmark findings in shipped states', async ({ page }) => {
   expect(await axeFindings(page)).toEqual([])
+  // axe's `label` rule accepts a bare `placeholder` as an accessible name, so a
+  // deleted label can leave this gate green. See `control-names.ts`.
+  expect(formatControlNameFailures(await auditControlNames(page)), 'form controls named only by placeholder/title on arrival').toEqual([])
   await page.getByRole('button', { name: 'Show plain fold' }).click()
   await page.getByRole('button', { name: 'Compute cross term T' }).click()
   await page.getByRole('button', { name: 'Derive r and relax' }).click()
@@ -15,6 +19,7 @@ test('has no WCAG A/AA or landmark findings in shipped states', async ({ page })
   await expect(page.getByText('FOLDED 8 → 1, VALID')).toBeVisible()
   await page.getByRole('button', { name: 'Open final W′ and E′' }).click()
   expect(await axeFindings(page)).toEqual([])
+  expect(formatControlNameFailures(await auditControlNames(page)), 'form controls named only by placeholder/title after folding').toEqual([])
 })
 
 test('passes arithmetic text and non-text contrast audits', async ({ page }) => {

@@ -458,9 +458,19 @@ export function mountApp(root: HTMLElement | null): void {
   const retirement = root.querySelector<HTMLElement>('#chain-retirement')!
   let lastRunCount: number | null = null
   let latestChain: ChainResult | null = null
+  let pending: { count: number; frame: number } | null = null
 
   countSelect.addEventListener('change', () => {
     const next = Number(countSelect.value)
+    if (pending?.count === next) return
+    if (pending) {
+      cancelAnimationFrame(pending.frame)
+      pending = null
+      runChain.disabled = false
+      retirement.textContent = `Choose Fold ${next} steps to calculate the selected history.`
+      delete retirement.dataset.value
+    }
+    if (latestChain?.count === next) return
     runChain.textContent = `Fold ${next} steps`
     if (lastRunCount !== null && next !== lastRunCount) {
       chainResult.hidden = true
@@ -474,7 +484,8 @@ export function mountApp(root: HTMLElement | null): void {
     const count = Number(countSelect.value)
     runChain.disabled = true
     runChain.textContent = 'Folding…'
-    requestAnimationFrame(() => {
+    const frame = requestAnimationFrame(() => {
+      pending = null
       latestChain = foldChain(count)
       lastRunCount = count
       chainResult.hidden = false
@@ -553,6 +564,7 @@ export function mountApp(root: HTMLElement | null): void {
         ;(event.currentTarget as HTMLButtonElement).disabled = true
       })
     })
+    pending = { count, frame }
   })
 
   root.querySelectorAll<HTMLButtonElement>('[data-attack]').forEach((button) => {

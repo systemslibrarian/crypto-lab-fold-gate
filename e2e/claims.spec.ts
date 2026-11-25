@@ -39,6 +39,35 @@ const CROSS = crossTermOf(LEFT, RIGHT)
 
 test.beforeEach(async ({ page }) => openLab(page))
 
+test('changing the step count before a queued fold starts cancels the old history', async ({ page }) => {
+  const run = page.locator('#run-chain')
+  const count = page.locator('#step-count')
+  // Dispatch both real UI events within the same browser frame.
+  await page.evaluate(() => {
+    document.querySelector<HTMLButtonElement>('#run-chain')!.click()
+    const control = document.querySelector<HTMLSelectElement>('#step-count')!
+    control.value = '2'
+    control.dispatchEvent(new Event('change', { bubbles: true }))
+    return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  })
+  await expect(run).toBeEnabled()
+  await expect(run).toHaveText('Fold 2 steps')
+  await expect(page.locator('#chain-result')).toBeHidden()
+  await expect(page.locator('#chain-retirement')).not.toContainText('8 real steps folded')
+  await run.click()
+  await expect(page.locator('[data-claim="steps-absorbed"]')).toHaveText('2')
+  await count.dispatchEvent('change')
+  await expect(run).toHaveText('Fold 2 steps again')
+  await expect(page.locator('#chain-result')).toBeVisible()
+  await page.locator('#open-final').click()
+  await expect(page.locator('#opening-result')).toBeVisible()
+  await count.selectOption('4')
+  await expect(page.locator('#chain-result')).toBeHidden()
+  await run.click()
+  await expect(page.locator('[data-claim="steps-absorbed"]')).toHaveText('4')
+  await expect(page.locator('#opening-result')).toBeHidden()
+})
+
 test('the rendered instances are the R1CS this lab describes', async ({ page }) => {
   await expectClaim(page, 'A', { value: matrixValue(MATRIX_A), note: 'row one takes x on the left of both products' })
   await expectClaim(page, 'B', { value: matrixValue(MATRIX_B), note: 'row one squares x; row two multiplies by the witness x²' })
